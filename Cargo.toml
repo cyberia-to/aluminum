@@ -1,0 +1,38 @@
+[workspace]
+members = [".", "tools"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "LicenseRef-Cyber"
+
+[workspace.dependencies]
+metal = { path = "." }
+
+[package]
+name = "metal"
+description = "Pure Rust access to Apple Metal GPU — zero deps, direct objc_msgSend FFI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "metal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "metal_probe"
+path = "src/probe/main.rs"
+
+[[example]]
+name = "vecadd"
+path = "examples/vecadd.rs"
+
+[[example]]
+name = "matmul"
+path = "examples/matmul.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
