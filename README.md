@@ -108,6 +108,16 @@ cargo run --release -p metal-benches --bin bench
 
 requires macOS with Metal-capable GPU.
 
+## contributing
+
+we welcome pull requests. especially:
+
+- **performance** — faster dispatch, better batching, tighter FFI
+- **safety** — soundness fixes, better error handling, UB elimination
+- **hardware** — tested only on M1 Pro. if you have M2/M3/M4 or any other Apple Silicon — your benchmarks and fixes are gold
+
+fork, branch, PR. keep it simple: `cargo fmt`, `cargo clippy`, `cargo test`, examples run.
+
 ## license
 
 don't trust. don't fear. don't beg.
