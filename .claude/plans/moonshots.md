@@ -11,7 +11,7 @@ ALL ideas tested except #6 (MPP — researching).
 | #3 | stream-K | ✗ worse | 2761 | -22% |
 | #4 | dual accumulator (8 acc/sg) | ✗ worse | 3073 | -12% |
 | #5 | SLC priming | ✓ marginal | +2.6% | cold→warm |
-| #6 | Metal Performance Primitives | ? researching | — | — |
+| #6 | Metal Performance Primitives | ✓ exists, needs Metal 4 SDK | — | future benchmark target |
 | #7 | Z-curve tile affinity | ✗ same | 3463 | -0.8% |
 | #8 | 3×2 accumulator grid | ✗ worse | 2535 | -27% |
 | #9 | mixed-precision 2-pass | ✗ N/A | — | already optimal |
