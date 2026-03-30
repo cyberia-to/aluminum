@@ -10,7 +10,7 @@
 // ── rmetal (direct objc_msgSend FFI) ──
 
 mod rmetal_bench {
-    use metal::MtlDevice;
+    use aluminium::MtlDevice;
     use std::time::Instant;
 
     pub fn device_discovery(iters: usize) -> f64 {
@@ -104,7 +104,7 @@ mod rmetal_bench {
         }
 
         let t0 = Instant::now();
-        let mut last_cmd = None::<metal::MtlCommandBuffer>;
+        let mut last_cmd = None::<aluminium::MtlCommandBuffer>;
         for _ in 0..iters {
             unsafe {
                 let cmd = queue.command_buffer_unchecked();
@@ -204,7 +204,7 @@ mod rmetal_bench {
         let buf = dev.new_buffer(256 * 4).unwrap();
 
         for _ in 0..10 {
-            metal::autorelease_pool(|| unsafe {
+            aluminium::autorelease_pool(|| unsafe {
                 let cmd = queue.command_buffer_autoreleased();
                 let enc = cmd.compute_encoder_autoreleased();
                 enc.set_pipeline(&pipe);
@@ -218,7 +218,7 @@ mod rmetal_bench {
 
         let t0 = Instant::now();
         // Single outer pool, drain every 64 iters to prevent unbounded growth
-        metal::autorelease_pool(|| {
+        aluminium::autorelease_pool(|| {
             for i in 0..iters {
                 unsafe {
                     let cmd = queue.command_buffer_autoreleased();
@@ -298,7 +298,7 @@ mod rmetal_bench {
 
     /// Raw dispatch — bypass all wrappers. Pure objc_msgSend + cached sel.
     pub fn dispatch_raw(iters: usize) -> f64 {
-        use metal::ffi::*;
+        use aluminium::ffi::*;
         use std::ffi::c_void;
 
         let dev = MtlDevice::system_default().unwrap();
@@ -379,7 +379,7 @@ mod rmetal_bench {
 
     /// ComputeDispatcher: pre-resolved IMP + unretained references
     pub fn dispatch_imp(iters: usize) -> f64 {
-        use metal::ComputeDispatcher;
+        use aluminium::ComputeDispatcher;
 
         let dev = MtlDevice::system_default().unwrap();
         let queue = dev.new_command_queue().unwrap();
@@ -402,7 +402,7 @@ mod rmetal_bench {
 
     /// SAXPY with ComputeDispatcher
     pub fn large_compute_imp(iters: usize, n: usize) -> f64 {
-        use metal::ComputeDispatcher;
+        use aluminium::ComputeDispatcher;
 
         let dev = MtlDevice::system_default().unwrap();
         let queue = dev.new_command_queue().unwrap();
@@ -461,7 +461,7 @@ mod rmetal_bench {
 
     /// Batch encode: N dispatches per command buffer, amortized cost per dispatch
     pub fn batch_encode(batch_size: usize, iters: usize) -> f64 {
-        use metal::ComputeDispatcher;
+        use aluminium::ComputeDispatcher;
 
         let dev = MtlDevice::system_default().unwrap();
         let queue = dev.new_command_queue().unwrap();
@@ -539,7 +539,7 @@ mod rmetal_bench {
 
     /// Pipelined dispatch: overlap GPU execution of batch N with encoding of N+1
     pub fn dispatch_pipelined(iters: usize) -> f64 {
-        use metal::ComputeDispatcher;
+        use aluminium::ComputeDispatcher;
 
         let dev = MtlDevice::system_default().unwrap();
         let queue = dev.new_command_queue().unwrap();
@@ -567,19 +567,19 @@ mod rmetal_bench {
                 })
             };
             if let Some(p) = prev {
-                metal::GpuFuture::wait(p);
+                aluminium::GpuFuture::wait(p);
             }
             prev = Some(future);
         }
         if let Some(p) = prev {
-            metal::GpuFuture::wait(p);
+            aluminium::GpuFuture::wait(p);
         }
         t0.elapsed().as_secs_f64() / iters as f64
     }
 
     /// Simulates inference pass: 3 kernels × N layers, single batch.
     pub fn inference_sim(layers: usize, iters: usize) -> f64 {
-        use metal::ComputeDispatcher;
+        use aluminium::ComputeDispatcher;
 
         let dev = MtlDevice::system_default().unwrap();
         let queue = dev.new_command_queue().unwrap();

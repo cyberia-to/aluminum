@@ -8,17 +8,17 @@ edition = "2021"
 license = "LicenseRef-Cyber"
 
 [workspace.dependencies]
-metal = { path = "." }
+aluminium = { path = "." }
 
 [package]
-name = "metal"
-description = "Pure Rust access to Apple Metal GPU — zero deps, direct objc_msgSend FFI"
+name = "aluminium"
+description = "Pure Rust Apple Metal GPU driver — zero deps, direct objc_msgSend FFI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "metal"
+name = "aluminium"
 path = "src/lib.rs"
 
 [[bin]]

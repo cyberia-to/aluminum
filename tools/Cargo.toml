@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-metal.workspace = true
+aluminium.workspace = true
 objc2 = "0.6"
 objc2-metal = { version = "0.3", features = ["MTLDevice", "MTLCommandQueue", "MTLCommandBuffer", "MTLComputeCommandEncoder", "MTLComputePipeline", "MTLResource", "MTLBuffer", "MTLLibrary"] }
 objc2-foundation = { version = "0.3", features = ["NSString", "NSError"] }
@@ -17,19 +17,3 @@ path = "bench.rs"
 [[bin]]
 name = "compare"
 path = "compare.rs"
-
-[[bin]]
-name = "quant_bench"
-path = "quant_bench.rs"
-
-[[bin]]
-name = "moonshot"
-path = "moonshot.rs"
-
-[[bin]]
-name = "profile"
-path = "profile.rs"
-
-[[bin]]
-name = "q4k_bench"
-path = "q4k_bench.rs"

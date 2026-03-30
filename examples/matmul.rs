@@ -1,6 +1,6 @@
 //! Matrix multiplication on Metal GPU — compute example
 
-use metal::{MetalError, MtlDevice};
+use aluminium::{MetalError, MtlDevice};
 
 fn main() -> Result<(), MetalError> {
     let device = MtlDevice::system_default()?;

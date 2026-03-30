@@ -4,7 +4,7 @@
 //! Zero external dependencies. Only requires macOS with Metal support.
 //!
 //! ```no_run
-//! use metal::{MtlDevice, MetalError};
+//! use aluminium::{MtlDevice, MetalError};
 //!
 //! let device = MtlDevice::system_default()?;
 //! let queue = device.new_command_queue()?;
@@ -38,7 +38,7 @@
 //! enc.end_encoding();
 //! cmd.commit();
 //! cmd.wait_until_completed();
-//! # Ok::<(), metal::MetalError>(())
+//! # Ok::<(), aluminium::MetalError>(())
 //! ```
 
 #![allow(
