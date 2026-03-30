@@ -28,7 +28,7 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "metal_probe"
-path = "src/metal_probe.rs"
+path = "src/probe.rs"
 
 [[example]]
 name = "vecadd"
