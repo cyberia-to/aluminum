@@ -490,9 +490,9 @@ fn main() -> Result<(), MetalError> {
                                  uint sgid [[simdgroup_index_in_threadgroup]],
                                  uint lid [[thread_index_in_threadgroup]]) {
 
-                // BM=64 BN=64 BK=32, padding=4, 16 sg, 512 threads
-                threadgroup half tA[64][36];  // 32+4
-                threadgroup half tB[32][68];  // 64+4
+                // BM=64 BN=64 BK=32, pad+1/+2 (8448B TG, optimal), 16 sg, 512 thr
+                threadgroup half tA[64][33];  // 32+1
+                threadgroup half tB[32][66];  // 64+2
                 uint grow = group_id.y << 6u;  // *64
                 uint gcol = group_id.x << 6u;
                 uint sg_row = (sgid >> 2u) << 4u;  // (sgid/4)*16
@@ -526,37 +526,37 @@ fn main() -> Result<(), MetalError> {
                     threadgroup_barrier(mem_flags::mem_threadgroup);
 
                     simdgroup_half8x8 at0, at1, bt0, bt1;
-                    simdgroup_load(at0, &tA[sg_row][0], 36);
-                    simdgroup_load(at1, &tA[sg_row + 8u][0], 36);
-                    simdgroup_load(bt0, &tB[0][sg_col], 68);
-                    simdgroup_load(bt1, &tB[0][sg_col + 8u], 68);
+                    simdgroup_load(at0, &tA[sg_row][0], 33);
+                    simdgroup_load(at1, &tA[sg_row + 8u][0], 33);
+                    simdgroup_load(bt0, &tB[0][sg_col], 66);
+                    simdgroup_load(bt1, &tB[0][sg_col + 8u], 66);
                     simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
                     simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
                     simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
                     simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
 
-                    simdgroup_load(at0, &tA[sg_row][8], 36);
-                    simdgroup_load(at1, &tA[sg_row + 8u][8], 36);
-                    simdgroup_load(bt0, &tB[8][sg_col], 68);
-                    simdgroup_load(bt1, &tB[8][sg_col + 8u], 68);
+                    simdgroup_load(at0, &tA[sg_row][8], 33);
+                    simdgroup_load(at1, &tA[sg_row + 8u][8], 33);
+                    simdgroup_load(bt0, &tB[8][sg_col], 66);
+                    simdgroup_load(bt1, &tB[8][sg_col + 8u], 66);
                     simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
                     simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
                     simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
                     simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
 
-                    simdgroup_load(at0, &tA[sg_row][16], 36);
-                    simdgroup_load(at1, &tA[sg_row + 8u][16], 36);
-                    simdgroup_load(bt0, &tB[16][sg_col], 68);
-                    simdgroup_load(bt1, &tB[16][sg_col + 8u], 68);
+                    simdgroup_load(at0, &tA[sg_row][16], 33);
+                    simdgroup_load(at1, &tA[sg_row + 8u][16], 33);
+                    simdgroup_load(bt0, &tB[16][sg_col], 66);
+                    simdgroup_load(bt1, &tB[16][sg_col + 8u], 66);
                     simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
                     simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
                     simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
                     simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
 
-                    simdgroup_load(at0, &tA[sg_row][24], 36);
-                    simdgroup_load(at1, &tA[sg_row + 8u][24], 36);
-                    simdgroup_load(bt0, &tB[24][sg_col], 68);
-                    simdgroup_load(bt1, &tB[24][sg_col + 8u], 68);
+                    simdgroup_load(at0, &tA[sg_row][24], 33);
+                    simdgroup_load(at1, &tA[sg_row + 8u][24], 33);
+                    simdgroup_load(bt0, &tB[24][sg_col], 66);
+                    simdgroup_load(bt1, &tB[24][sg_col + 8u], 66);
                     simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
                     simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
                     simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
