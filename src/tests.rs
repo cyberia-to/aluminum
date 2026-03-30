@@ -337,4 +337,52 @@ mod device_tests {
         let se = dev.new_shared_event().unwrap();
         assert_eq!(se.signaled_value(), 0);
     }
+
+    #[test]
+    fn buffer_zero_size_rejected() {
+        let dev = MtlDevice::system_default().unwrap();
+        assert!(dev.new_buffer(0).is_err());
+        assert!(dev.new_buffer_private(0).is_err());
+    }
+
+    #[test]
+    fn texture_create_and_properties() {
+        use crate::ffi::*;
+        let dev = MtlDevice::system_default().unwrap();
+
+        // Create a texture descriptor for 16x16 RGBA8
+        unsafe {
+            let cls = objc_getClass(c"MTLTextureDescriptor".as_ptr()) as ObjcId;
+            let desc = msg0(cls, sel_registerName(c"new".as_ptr()));
+            assert!(!desc.is_null());
+
+            // setTextureType: MTLTextureType2D = 2
+            type SetU = unsafe extern "C" fn(ObjcId, ObjcSel, NSUInteger);
+            let set_u: SetU = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+            set_u(desc, sel_registerName(c"setTextureType:".as_ptr()), 2);
+            set_u(
+                desc,
+                sel_registerName(c"setPixelFormat:".as_ptr()),
+                MTLPixelFormatRGBA8Unorm,
+            );
+            set_u(desc, sel_registerName(c"setWidth:".as_ptr()), 16);
+            set_u(desc, sel_registerName(c"setHeight:".as_ptr()), 16);
+
+            let tex = dev.new_texture(desc).unwrap();
+            assert_eq!(tex.width(), 16);
+            assert_eq!(tex.height(), 16);
+            assert_eq!(tex.depth(), 1);
+            assert_eq!(tex.pixel_format(), MTLPixelFormatRGBA8Unorm);
+
+            release(desc);
+        }
+    }
+
+    #[test]
+    fn command_buffer_status_constants() {
+        use crate::MtlCommandBuffer;
+        assert_eq!(MtlCommandBuffer::STATUS_NOT_ENQUEUED, 0);
+        assert_eq!(MtlCommandBuffer::STATUS_COMPLETED, 4);
+        assert_eq!(MtlCommandBuffer::STATUS_ERROR, 5);
+    }
 }

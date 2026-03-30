@@ -46,6 +46,7 @@ impl MtlBuffer {
     /// # Panics
     /// Panics if called on a private-mode buffer (not CPU-accessible).
     #[inline]
+    #[track_caller]
     pub fn with_data<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&[u8]) -> R,
@@ -60,6 +61,7 @@ impl MtlBuffer {
     /// # Panics
     /// Panics if called on a private-mode buffer (not CPU-accessible).
     #[inline]
+    #[track_caller]
     pub fn with_data_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
@@ -71,9 +73,12 @@ impl MtlBuffer {
 
     /// Read access as f32 slice.
     ///
+    /// Length = `size / 4` (trailing bytes not divisible by 4 are ignored).
+    ///
     /// # Panics
     /// Panics if called on a private-mode buffer or if contents pointer is not 4-byte aligned.
     #[inline]
+    #[track_caller]
     pub fn with_f32<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&[f32]) -> R,
@@ -88,9 +93,12 @@ impl MtlBuffer {
 
     /// Write access as f32 slice.
     ///
+    /// Length = `size / 4` (trailing bytes not divisible by 4 are ignored).
+    ///
     /// # Panics
     /// Panics if called on a private-mode buffer or if contents pointer is not 4-byte aligned.
     #[inline]
+    #[track_caller]
     pub fn with_f32_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut [f32]) -> R,

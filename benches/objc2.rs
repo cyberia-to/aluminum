@@ -4,6 +4,8 @@ use objc2_foundation::NSString;
 use objc2_metal::*;
 use std::time::Instant;
 
+use super::shaders::{NOOP as NOOP_SRC, SAXPY as SAXPY_SRC};
+
 fn get_device() -> Retained<ProtocolObject<dyn MTLDevice>> {
     MTLCreateSystemDefaultDevice().expect("no metal device")
 }
@@ -238,17 +240,6 @@ pub fn large_compute(iters: usize, n: usize) -> f64 {
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
-const SAXPY_SRC: &str = r#"
-    #include <metal_stdlib>
-    using namespace metal;
-    kernel void saxpy(device const float *x [[buffer(0)]],
-                      device float *y       [[buffer(1)]],
-                      constant float &a     [[buffer(2)]],
-                      uint id [[thread_position_in_grid]]) {
-        y[id] = a * x[id] + y[id];
-    }
-"#;
-
 /// Batch encode: N dispatches per cmd buffer, amortized cost
 pub fn batch_encode(batch_size: usize, iters: usize) -> f64 {
     let dev = get_device();
@@ -418,12 +409,3 @@ pub fn inference_sim(layers: usize, iters: usize) -> f64 {
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
-
-const NOOP_SRC: &str = r#"
-    #include <metal_stdlib>
-    using namespace metal;
-    kernel void noop(device float *a [[buffer(0)]],
-                     uint id [[thread_position_in_grid]]) {
-        a[id] = a[id] + 1.0;
-    }
-"#;

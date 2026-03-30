@@ -180,10 +180,17 @@ impl MtlCommandBuffer {
         unsafe { msg0_void(self.raw, SEL_waitUntilCompleted()) };
     }
 
-    /// Command buffer status.
+    /// Command buffer status (see `STATUS_*` constants).
     pub fn status(&self) -> u64 {
         unsafe { msg0_u64(self.raw, SEL_status()) }
     }
+
+    pub const STATUS_NOT_ENQUEUED: u64 = 0;
+    pub const STATUS_ENQUEUED: u64 = 1;
+    pub const STATUS_COMMITTED: u64 = 2;
+    pub const STATUS_SCHEDULED: u64 = 3;
+    pub const STATUS_COMPLETED: u64 = 4;
+    pub const STATUS_ERROR: u64 = 5;
 
     /// Get error description if the command buffer failed.
     pub fn error(&self) -> Option<String> {

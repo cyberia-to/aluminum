@@ -81,7 +81,12 @@ impl MtlDevice {
     }
 
     /// Create a shared-mode buffer of the given byte size.
+    ///
+    /// `size` must be > 0. Use `new_buffer_with_data` for initialized buffers.
     pub fn new_buffer(&self, size: usize) -> Result<MtlBuffer, MetalError> {
+        if size == 0 {
+            return Err(MetalError::BufferCreationFailed("size must be > 0".into()));
+        }
         let raw = unsafe {
             msg2::<NSUInteger, NSUInteger>(
                 self.raw,
@@ -100,6 +105,9 @@ impl MtlDevice {
     /// Private storage gives Metal full control over memory placement and caching,
     /// which can yield higher GPU bandwidth for inter-layer inference buffers.
     pub fn new_buffer_private(&self, size: usize) -> Result<MtlBuffer, MetalError> {
+        if size == 0 {
+            return Err(MetalError::BufferCreationFailed("size must be > 0".into()));
+        }
         let raw = unsafe {
             msg2::<NSUInteger, NSUInteger>(
                 self.raw,

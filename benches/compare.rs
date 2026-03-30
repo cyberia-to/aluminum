@@ -5,6 +5,7 @@
 
 mod aluminium;
 mod objc2;
+mod shaders;
 
 fn us(secs: f64) -> f64 {
     secs * 1_000_000.0

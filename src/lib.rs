@@ -35,17 +35,21 @@ pub use fp16::{cvt_f16_f32, cvt_f32_f16, f32_to_fp16, fp16_to_f32};
 
 /// Execute a closure inside an autorelease pool.
 /// Use this to scope autoreleased ObjC objects (e.g. from `command_buffer_unretained`).
+/// The pool is drained even if the closure panics (unwind-safe).
 #[inline]
 pub fn autorelease_pool<F, R>(f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    unsafe {
-        let pool = ffi::objc_autoreleasePoolPush();
-        let result = f();
-        ffi::objc_autoreleasePoolPop(pool);
-        result
+    struct PoolGuard(*mut std::ffi::c_void);
+    impl Drop for PoolGuard {
+        fn drop(&mut self) {
+            unsafe { ffi::objc_autoreleasePoolPop(self.0) };
+        }
     }
+    let pool = unsafe { ffi::objc_autoreleasePoolPush() };
+    let _guard = PoolGuard(pool);
+    f()
 }
 
 /// Errors returned by aluminium operations.
