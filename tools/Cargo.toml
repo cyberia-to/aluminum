@@ -29,3 +29,7 @@ path = "moonshot.rs"
 [[bin]]
 name = "profile"
 path = "profile.rs"
+
+[[bin]]
+name = "q4k_bench"
+path = "q4k_bench.rs"
