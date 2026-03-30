@@ -7,12 +7,9 @@ version = "0.1.0"
 edition = "2021"
 license-file = "LICENSE"
 
-[workspace.dependencies]
-cyb-aruminium = { path = "." }
-
 [package]
-name = "cyb-aruminium"
-description = "Pure Rust Apple Metal GPU driver — zero deps, direct objc_msgSend FFI"
+name = "aruminium"
+description = "light rust metal driver"
 version.workspace = true
 edition.workspace = true
 license-file.workspace = true
