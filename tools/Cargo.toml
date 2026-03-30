@@ -21,3 +21,7 @@ path = "compare.rs"
 [[bin]]
 name = "quant_bench"
 path = "quant_bench.rs"
+
+[[bin]]
+name = "moonshot"
+path = "moonshot.rs"
