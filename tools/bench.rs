@@ -583,6 +583,180 @@ fn main() -> Result<(), MetalError> {
             Err(e) => println!("  opt: FAIL: {e}"),
         }
 
+        // ── Persistent kernel: 16 threadgroups loop over tiles ──
+        println!("\n  === Persistent kernel (16 TG, loop over tiles) ===");
+        {
+            let persistent_src = r#"
+                #include <metal_stdlib>
+                #include <metal_simdgroup_matrix>
+                using namespace metal;
+                struct P { uint M; uint N; uint K; uint tiles_n; uint total_tiles; };
+
+                kernel void gemm_persistent(
+                    device const half *A [[buffer(0)]],
+                    device const half *B [[buffer(1)]],
+                    device half *C       [[buffer(2)]],
+                    constant P &p        [[buffer(3)]],
+                    uint tg_id [[threadgroup_position_in_grid]],
+                    uint sgid [[simdgroup_index_in_threadgroup]],
+                    uint lid [[thread_index_in_threadgroup]]) {
+
+                    threadgroup half tA[64][36];
+                    threadgroup half tB[32][68];
+
+                    device const half4 *A4 = (device const half4 *)A;
+                    device const half4 *B4 = (device const half4 *)B;
+                    uint a4s = p.K >> 2u;
+                    uint b4s = p.N >> 2u;
+
+                    uint sg_row = (sgid >> 2u) << 4u;
+                    uint sg_col = (sgid & 3u) << 4u;
+
+                    // Loop over tiles assigned to this threadgroup
+                    for (uint tile = tg_id; tile < p.total_tiles; tile += 16u) {
+                        uint tile_y = tile / p.tiles_n;
+                        uint tile_x = tile - tile_y * p.tiles_n;
+                        uint grow = tile_y << 6u;
+                        uint gcol = tile_x << 6u;
+
+                        simdgroup_half8x8 acc[2][2];
+                        for (uint i = 0; i < 2u; i++)
+                            for (uint j = 0; j < 2u; j++)
+                                acc[i][j] = make_filled_simdgroup_matrix<half, 8>(half(0));
+
+                        for (uint t = 0; t < p.K; t += 32u) {
+                            {
+                                uint r = lid >> 3u;
+                                uint c4 = lid & 7u;
+                                half4 v = A4[(grow + r) * a4s + (t >> 2u) + c4];
+                                uint bc = c4 << 2u;
+                                tA[r][bc] = v.x; tA[r][bc+1] = v.y;
+                                tA[r][bc+2] = v.z; tA[r][bc+3] = v.w;
+                            }
+                            {
+                                uint r = lid >> 4u;
+                                uint c4 = lid & 15u;
+                                half4 v = B4[(t + r) * b4s + (gcol >> 2u) + c4];
+                                uint bc = c4 << 2u;
+                                tB[r][bc] = v.x; tB[r][bc+1] = v.y;
+                                tB[r][bc+2] = v.z; tB[r][bc+3] = v.w;
+                            }
+                            threadgroup_barrier(mem_flags::mem_threadgroup);
+
+                            simdgroup_half8x8 at0, at1, bt0, bt1;
+                            simdgroup_load(at0, &tA[sg_row][0], 36);
+                            simdgroup_load(at1, &tA[sg_row+8u][0], 36);
+                            simdgroup_load(bt0, &tB[0][sg_col], 68);
+                            simdgroup_load(bt1, &tB[0][sg_col+8u], 68);
+                            simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                            simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                            simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                            simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                            simdgroup_load(at0, &tA[sg_row][8], 36);
+                            simdgroup_load(at1, &tA[sg_row+8u][8], 36);
+                            simdgroup_load(bt0, &tB[8][sg_col], 68);
+                            simdgroup_load(bt1, &tB[8][sg_col+8u], 68);
+                            simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                            simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                            simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                            simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                            simdgroup_load(at0, &tA[sg_row][16], 36);
+                            simdgroup_load(at1, &tA[sg_row+8u][16], 36);
+                            simdgroup_load(bt0, &tB[16][sg_col], 68);
+                            simdgroup_load(bt1, &tB[16][sg_col+8u], 68);
+                            simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                            simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                            simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                            simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                            simdgroup_load(at0, &tA[sg_row][24], 36);
+                            simdgroup_load(at1, &tA[sg_row+8u][24], 36);
+                            simdgroup_load(bt0, &tB[24][sg_col], 68);
+                            simdgroup_load(bt1, &tB[24][sg_col+8u], 68);
+                            simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                            simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                            simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                            simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                            threadgroup_barrier(mem_flags::mem_threadgroup);
+                        }
+
+                        for (uint i = 0; i < 2u; i++)
+                            for (uint j = 0; j < 2u; j++)
+                                simdgroup_store(acc[i][j],
+                                    C + (grow + sg_row + i*8u) * p.N + (gcol + sg_col + j*8u), p.N);
+
+                        threadgroup_barrier(mem_flags::mem_threadgroup);
+                    }
+                }
+            "#;
+
+            #[repr(C)]
+            struct Pp {
+                m: u32,
+                n: u32,
+                k: u32,
+                tiles_n: u32,
+                total_tiles: u32,
+            }
+            let tiles_n = dim >> 6;
+            let tiles_m = dim >> 6;
+            let total_tiles = tiles_m * tiles_n;
+            let pp = Pp {
+                m: dim as u32,
+                n: dim as u32,
+                k: dim as u32,
+                tiles_n: tiles_n as u32,
+                total_tiles: total_tiles as u32,
+            };
+            let ppb = unsafe {
+                std::slice::from_raw_parts(&pp as *const Pp as *const u8, std::mem::size_of::<Pp>())
+            };
+
+            let lib = device.new_library_with_source(persistent_src)?;
+            let pipe = device.new_compute_pipeline(&lib.get_function("gemm_persistent")?)?;
+
+            // 16 threadgroups (1 per GPU core), each loops over ~64 tiles
+            let grid = (16, 1, 1);
+            let group = (512, 1, 1);
+
+            let gf = compile_and_bench(
+                &device,
+                &queue,
+                persistent_src,
+                "gemm_persistent",
+                &a,
+                &b,
+                &c,
+                ppb,
+                dim,
+                grid,
+                group,
+            )?;
+            println!("  persistent (16 TG, loop): {:.0} GFLOPS", gf);
+
+            // Also try 32 and 48 threadgroups
+            for &ntg in &[32usize, 48, 64] {
+                let grid2 = (ntg, 1, 1);
+                let gf2 = compile_and_bench(
+                    &device,
+                    &queue,
+                    persistent_src,
+                    "gemm_persistent",
+                    &a,
+                    &b,
+                    &c,
+                    ppb,
+                    dim,
+                    grid2,
+                    group,
+                )?;
+                println!("  persistent ({ntg} TG, loop): {:.0} GFLOPS", gf2);
+            }
+        }
+
         // ── Last mile: occupancy tuning ──
         println!("\n  === LAST MILE: occupancy + pipelining ===");
         bench_last_mile(&device, &queue, pb, dim, &a, &b, &c)?;
