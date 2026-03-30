@@ -583,6 +583,113 @@ fn main() -> Result<(), MetalError> {
             Err(e) => println!("  opt: FAIL: {e}"),
         }
 
+        // ── MOONSHOT #11: zero-barrier direct device load ──
+        println!("\n  === MOONSHOT: direct device simdgroup_load (no TG, no barriers) ===");
+        {
+            let direct_src = r#"
+                #include <metal_stdlib>
+                #include <metal_simdgroup_matrix>
+                using namespace metal;
+                struct P { uint M; uint N; uint K; };
+
+                kernel void gemm_direct(device const half *A [[buffer(0)]],
+                                        device const half *B [[buffer(1)]],
+                                        device half *C       [[buffer(2)]],
+                                        constant P &p        [[buffer(3)]],
+                                        uint2 group_id [[threadgroup_position_in_grid]],
+                                        uint sgid [[simdgroup_index_in_threadgroup]]) {
+
+                    uint grow = (group_id.y << 6u) + ((sgid >> 2u) << 4u);
+                    uint gcol = (group_id.x << 6u) + ((sgid & 3u) << 4u);
+
+                    simdgroup_half8x8 acc[2][2];
+                    for (uint i = 0; i < 2u; i++)
+                        for (uint j = 0; j < 2u; j++)
+                            acc[i][j] = make_filled_simdgroup_matrix<half, 8>(half(0));
+
+                    for (uint t = 0; t < p.K; t += 8u) {
+                        simdgroup_half8x8 at[2], bt[2];
+                        simdgroup_load(at[0], A + grow      * p.K + t, p.K);
+                        simdgroup_load(at[1], A + (grow+8u) * p.K + t, p.K);
+                        simdgroup_load(bt[0], B + t * p.N + gcol,      p.N);
+                        simdgroup_load(bt[1], B + t * p.N + gcol + 8u, p.N);
+
+                        for (uint i = 0; i < 2u; i++)
+                            for (uint j = 0; j < 2u; j++)
+                                simdgroup_multiply_accumulate(acc[i][j], at[i], bt[j], acc[i][j]);
+                    }
+
+                    for (uint i = 0; i < 2u; i++)
+                        for (uint j = 0; j < 2u; j++)
+                            simdgroup_store(acc[i][j],
+                                C + (grow+i*8u) * p.N + gcol + j*8u, p.N);
+                }
+            "#;
+
+            for &test_dim in &[2048usize, 4096] {
+                let at = device.new_buffer(test_dim * test_dim * 2)?;
+                let bt = device.new_buffer(test_dim * test_dim * 2)?;
+                let ct = device.new_buffer(test_dim * test_dim * 2)?;
+                at.with_data_mut(|d| {
+                    let s = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            d.as_mut_ptr() as *mut u16,
+                            test_dim * test_dim,
+                        )
+                    };
+                    for v in s.iter_mut() {
+                        *v = metal::f32_to_fp16(0.001);
+                    }
+                });
+                bt.with_data_mut(|d| {
+                    let s = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            d.as_mut_ptr() as *mut u16,
+                            test_dim * test_dim,
+                        )
+                    };
+                    for v in s.iter_mut() {
+                        *v = metal::f32_to_fp16(0.001);
+                    }
+                });
+                #[repr(C)]
+                struct Pd {
+                    m: u32,
+                    n: u32,
+                    k: u32,
+                }
+                let pd = Pd {
+                    m: test_dim as u32,
+                    n: test_dim as u32,
+                    k: test_dim as u32,
+                };
+                let pdb = unsafe {
+                    std::slice::from_raw_parts(
+                        &pd as *const Pd as *const u8,
+                        std::mem::size_of::<Pd>(),
+                    )
+                };
+                let grid = (test_dim.div_ceil(64), test_dim.div_ceil(64), 1);
+                let group = (512, 1, 1);
+                match compile_and_bench(
+                    &device,
+                    &queue,
+                    direct_src,
+                    "gemm_direct",
+                    &at,
+                    &bt,
+                    &ct,
+                    pdb,
+                    test_dim,
+                    grid,
+                    group,
+                ) {
+                    Ok(gf) => println!("  direct {test_dim}×{test_dim}: {:.0} GFLOPS", gf),
+                    Err(e) => println!("  direct {test_dim}: FAIL: {e}"),
+                }
+            }
+        }
+
         // ── MOONSHOT #1+#2: software-pipelined MMA + async-style double buffer ──
         println!("\n  === MOONSHOT: pipelined MMA + dual accumulator ===");
         {
