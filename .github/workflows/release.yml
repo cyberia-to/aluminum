@@ -13,8 +13,9 @@ jobs:
 
       - name: Verify tag matches Cargo.toml version
         run: |
-          CARGO_VER=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="aruminium") | .version')
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           TAG_VER="${GITHUB_REF_NAME#v}"
+          echo "Cargo.toml: $CARGO_VER, tag: $TAG_VER"
           if [ "$CARGO_VER" != "$TAG_VER" ]; then
             echo "ERROR: tag $TAG_VER != Cargo.toml $CARGO_VER"
             exit 1
