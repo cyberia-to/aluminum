@@ -18,7 +18,13 @@ type ImpBuf = unsafe extern "C" fn(ObjcId, ObjcSel, ObjcId, NSUInteger, NSUInteg
 type ImpBytes = unsafe extern "C" fn(ObjcId, ObjcSel, *const c_void, NSUInteger, NSUInteger);
 type ImpDisp = unsafe extern "C" fn(ObjcId, ObjcSel, MTLSize, MTLSize);
 
+/// # Safety
+/// T must be a function pointer type with the same size as `*const c_void`.
 unsafe fn resolve_imp<T>(cls: ObjcClass, sel: ObjcSel) -> T {
+    assert!(
+        std::mem::size_of::<T>() == std::mem::size_of::<*const c_void>(),
+        "resolve_imp: T must be pointer-sized"
+    );
     std::mem::transmute_copy(&class_getMethodImplementation(cls, sel))
 }
 
@@ -60,8 +66,10 @@ pub struct ComputeDispatcher {
 impl ComputeDispatcher {
     /// Create a new dispatcher from a command queue.
     /// Resolves all ObjC method implementations eagerly.
+    /// Retains the queue — safe to drop the original `MtlCommandQueue`.
     pub fn new(queue: &MtlCommandQueue) -> Self {
         let q = queue.as_raw();
+        unsafe { objc_retain(q) };
 
         // Selectors
         // Use regular commandBuffer — ARC fast-retain skips autorelease round-trip.
@@ -277,7 +285,9 @@ impl ComputeDispatcher {
         F: FnOnce(&BatchEncoder),
     {
         let cmd = (self.imp_cb)(self.queue, self.s_cb);
+        debug_assert!(!cmd.is_null(), "command buffer creation returned null");
         let enc = (self.imp_ce)(cmd, self.s_ce);
+        debug_assert!(!enc.is_null(), "compute encoder creation returned null");
 
         let batch = BatchEncoder {
             enc,
@@ -349,6 +359,12 @@ impl ComputeDispatcher {
             cmd,
             s_wt: self.s_wt,
         }
+    }
+}
+
+impl Drop for ComputeDispatcher {
+    fn drop(&mut self) {
+        unsafe { objc_release(self.queue) };
     }
 }
 

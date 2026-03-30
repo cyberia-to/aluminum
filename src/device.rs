@@ -196,21 +196,36 @@ impl MtlDevice {
     }
 
     /// Create a new fence.
-    pub fn new_fence(&self) -> crate::sync::MtlFence {
+    pub fn new_fence(&self) -> Result<crate::sync::MtlFence, MetalError> {
         let raw = unsafe { msg0(self.raw, SEL_newFence()) };
-        crate::sync::MtlFence::from_raw(raw)
+        if raw.is_null() {
+            return Err(MetalError::CommandBufferError(
+                "fence creation failed".into(),
+            ));
+        }
+        Ok(crate::sync::MtlFence::from_raw(raw))
     }
 
     /// Create a new event.
-    pub fn new_event(&self) -> crate::sync::MtlEvent {
+    pub fn new_event(&self) -> Result<crate::sync::MtlEvent, MetalError> {
         let raw = unsafe { msg0(self.raw, SEL_newEvent()) };
-        crate::sync::MtlEvent::from_raw(raw)
+        if raw.is_null() {
+            return Err(MetalError::CommandBufferError(
+                "event creation failed".into(),
+            ));
+        }
+        Ok(crate::sync::MtlEvent::from_raw(raw))
     }
 
     /// Create a new shared event.
-    pub fn new_shared_event(&self) -> crate::sync::MtlSharedEvent {
+    pub fn new_shared_event(&self) -> Result<crate::sync::MtlSharedEvent, MetalError> {
         let raw = unsafe { msg0(self.raw, SEL_newSharedEvent()) };
-        crate::sync::MtlSharedEvent::from_raw(raw)
+        if raw.is_null() {
+            return Err(MetalError::CommandBufferError(
+                "shared event creation failed".into(),
+            ));
+        }
+        Ok(crate::sync::MtlSharedEvent::from_raw(raw))
     }
 
     pub fn as_raw(&self) -> ObjcId {

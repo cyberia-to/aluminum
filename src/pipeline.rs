@@ -37,25 +37,3 @@ impl Drop for MtlComputePipeline {
         unsafe { release(self.raw) };
     }
 }
-
-/// A compiled render pipeline state. Wraps `id<MTLRenderPipelineState>`.
-pub struct MtlRenderPipeline {
-    raw: ObjcId,
-}
-
-impl MtlRenderPipeline {
-    #[allow(dead_code)]
-    pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlRenderPipeline { raw }
-    }
-
-    pub fn as_raw(&self) -> ObjcId {
-        self.raw
-    }
-}
-
-impl Drop for MtlRenderPipeline {
-    fn drop(&mut self) {
-        unsafe { release(self.raw) };
-    }
-}

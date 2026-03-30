@@ -6,6 +6,9 @@
     clippy::missing_transmute_annotations
 )]
 
+#[cfg(test)]
+mod tests;
+
 pub mod buffer;
 pub mod command;
 pub mod device;
@@ -23,7 +26,7 @@ pub use command::{MtlCommandBuffer, MtlCommandQueue};
 pub use device::MtlDevice;
 pub use dispatch::{BatchEncoder, ComputeDispatcher, GpuFuture};
 pub use encoder::{MtlBlitEncoder, MtlComputeEncoder};
-pub use pipeline::{MtlComputePipeline, MtlRenderPipeline};
+pub use pipeline::MtlComputePipeline;
 pub use shader::{MtlFunction, MtlLibrary};
 pub use sync::{MtlEvent, MtlFence, MtlSharedEvent};
 pub use texture::MtlTexture;

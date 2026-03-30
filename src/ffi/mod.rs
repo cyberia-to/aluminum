@@ -117,18 +117,6 @@ extern "C" {
     pub fn objc_retainAutoreleasedReturnValue(obj: ObjcId) -> ObjcId;
 }
 
-// ── Helpers (fallback for dynamic/rare selectors) ──
-
-pub fn sel(name: &str) -> ObjcSel {
-    let c = std::ffi::CString::new(name).unwrap();
-    unsafe { sel_registerName(c.as_ptr()) }
-}
-
-pub fn cls(name: &str) -> ObjcClass {
-    let c = std::ffi::CString::new(name).unwrap();
-    unsafe { objc_getClass(c.as_ptr()) }
-}
-
 // ── String helpers ──
 
 pub fn nserror_string(err: ObjcId) -> Option<String> {

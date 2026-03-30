@@ -42,46 +42,62 @@ impl MtlBuffer {
     }
 
     /// Read access to buffer data via closure.
+    ///
+    /// # Panics
+    /// Panics if called on a private-mode buffer (not CPU-accessible).
     #[inline]
     pub fn with_data<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&[u8]) -> R,
     {
-        let ptr = self.contents() as *const u8;
-        let slice = unsafe { std::slice::from_raw_parts(ptr, self.size) };
+        assert!(self.is_shared(), "with_data called on private buffer");
+        let slice = unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.size) };
         f(slice)
     }
 
     /// Write access to buffer data via closure.
+    ///
+    /// # Panics
+    /// Panics if called on a private-mode buffer (not CPU-accessible).
     #[inline]
     pub fn with_data_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
     {
-        let ptr = self.contents() as *mut u8;
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, self.size) };
+        assert!(self.is_shared(), "with_data_mut called on private buffer");
+        let slice = unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut u8, self.size) };
         f(slice)
     }
 
     /// Read access as f32 slice.
+    ///
+    /// # Panics
+    /// Panics if called on a private-mode buffer or if contents pointer is not 4-byte aligned.
     #[inline]
     pub fn with_f32<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&[f32]) -> R,
     {
-        let ptr = self.contents() as *const f32;
+        assert!(self.is_shared(), "with_f32 called on private buffer");
+        let ptr = self.ptr as *const f32;
+        assert!(ptr.is_aligned(), "buffer contents not 4-byte aligned");
         let len = self.size / 4;
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         f(slice)
     }
 
     /// Write access as f32 slice.
+    ///
+    /// # Panics
+    /// Panics if called on a private-mode buffer or if contents pointer is not 4-byte aligned.
     #[inline]
     pub fn with_f32_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut [f32]) -> R,
     {
-        let ptr = self.contents() as *mut f32;
+        assert!(self.is_shared(), "with_f32_mut called on private buffer");
+        let ptr = self.ptr as *mut f32;
+        assert!(ptr.is_aligned(), "buffer contents not 4-byte aligned");
         let len = self.size / 4;
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         f(slice)

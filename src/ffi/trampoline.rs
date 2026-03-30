@@ -138,33 +138,3 @@ pub unsafe fn msg_dispatch_void(target: ObjcId, sel: ObjcSel, grid: MTLSize, gro
     let f: F = std::mem::transmute(objc_msgSend as *const c_void);
     f(target, sel, grid, group);
 }
-
-// ── Convenience wrappers (for rare/dynamic selectors — NOT hot path) ──
-
-pub unsafe fn msg_send_0(target: ObjcId, selector: &str) -> ObjcId {
-    msg0(target, super::sel(selector))
-}
-
-pub unsafe fn msg_send_1<A>(target: ObjcId, selector: &str, a: A) -> ObjcId {
-    msg1(target, super::sel(selector), a)
-}
-
-pub unsafe fn msg_send_2<A, B>(target: ObjcId, selector: &str, a: A, b: B) -> ObjcId {
-    msg2(target, super::sel(selector), a, b)
-}
-
-pub unsafe fn msg_send_3<A, B, C>(target: ObjcId, selector: &str, a: A, b: B, c: C) -> ObjcId {
-    msg3(target, super::sel(selector), a, b, c)
-}
-
-pub unsafe fn msg_send_bool(target: ObjcId, selector: &str) -> bool {
-    msg0_bool(target, super::sel(selector))
-}
-
-pub unsafe fn msg_send_usize(target: ObjcId, selector: &str) -> NSUInteger {
-    msg0_usize(target, super::sel(selector))
-}
-
-pub unsafe fn msg_send_ptr(target: ObjcId, selector: &str) -> *mut c_void {
-    msg0_ptr(target, super::sel(selector))
-}

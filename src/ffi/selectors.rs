@@ -1,11 +1,11 @@
-//! Cached ObjC selectors and classes
+//! Cached ObjC selectors
 //!
 //! sel_registerName is idempotent: same C string -> same pointer.
 //! We cache the result via AtomicPtr with Relaxed ordering — on ARM64 this
 //! compiles to a plain `ldr` (no memory barrier). The race on first init is
 //! benign: sel_registerName always returns the same value for the same string.
 
-use super::{objc_getClass, sel_registerName, ObjcClass, ObjcSel};
+use super::{sel_registerName, ObjcSel};
 
 macro_rules! cached_sel {
     ($name:ident, $lit:expr) => {
@@ -25,8 +25,6 @@ macro_rules! cached_sel {
 }
 
 // Hot path selectors — called on every command buffer dispatch
-cached_sel!(SEL_retain, c"retain");
-cached_sel!(SEL_release, c"release");
 cached_sel!(SEL_commandBuffer, c"commandBuffer");
 cached_sel!(SEL_computeCommandEncoder, c"computeCommandEncoder");
 cached_sel!(SEL_setComputePipelineState, c"setComputePipelineState:");
@@ -134,27 +132,3 @@ cached_sel!(SEL_signaledValue, c"signaledValue");
 // NSString / NSError
 cached_sel!(SEL_localizedDescription, c"localizedDescription");
 cached_sel!(SEL_UTF8String, c"UTF8String");
-cached_sel!(SEL_stringWithUTF8String, c"stringWithUTF8String:");
-
-// ── Cached classes ──
-
-macro_rules! cached_cls {
-    ($name:ident, $lit:expr) => {
-        #[inline(always)]
-        pub fn $name() -> ObjcClass {
-            use std::sync::atomic::{AtomicPtr, Ordering};
-            static CACHE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
-            let p = CACHE.load(Ordering::Relaxed);
-            if !p.is_null() {
-                return p as ObjcClass;
-            }
-            let s = unsafe { objc_getClass($lit.as_ptr()) };
-            CACHE.store(s as *mut (), Ordering::Relaxed);
-            s
-        }
-    };
-}
-
-cached_cls!(CLS_NSString, c"NSString");
-cached_cls!(CLS_NSArray, c"NSArray");
-cached_cls!(CLS_NSDictionary, c"NSDictionary");

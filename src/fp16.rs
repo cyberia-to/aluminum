@@ -176,16 +176,19 @@ fn fp16_to_f32_soft(v: u16) -> f32 {
     let sign = (v >> 15) & 1;
     let exp = (v >> 10) & 0x1F;
     let frac = v & 0x3FF;
+    let sign_f = if sign != 0 { -1.0f32 } else { 1.0f32 };
     if exp == 0 {
-        ((-1.0f32).powi(sign as i32)) * (frac as f32 / 1024.0) * 2.0f32.powi(-14)
+        // subnormal or zero
+        sign_f * (frac as f32 / 1024.0) * 2.0f32.powi(-14)
     } else if exp == 31 {
+        // infinity or NaN — preserve sign
         if frac == 0 {
-            f32::INFINITY
+            sign_f * f32::INFINITY
         } else {
             f32::NAN
         }
     } else {
-        ((-1.0f32).powi(sign as i32)) * (1.0 + frac as f32 / 1024.0) * 2.0f32.powi(exp as i32 - 15)
+        sign_f * (1.0 + frac as f32 / 1024.0) * 2.0f32.powi(exp as i32 - 15)
     }
 }
 
@@ -198,10 +201,13 @@ fn f32_to_fp16_soft(v: f32) -> u16 {
     if exp > 15 {
         ((sign << 15) | 0x7C00) as u16
     } else if exp < -14 {
-        if exp < -24 {
+        // subnormal range: shift amount = -1 - exp + 13 = 12 - exp
+        // for exp < -19, shift >= 32 which overflows u32 — flush to zero
+        let shift = (12 - exp) as u32;
+        if shift >= 24 {
             (sign << 15) as u16
         } else {
-            ((sign << 15) | ((0x800000 | frac) >> (-1 - exp + 13))) as u16
+            ((sign << 15) | ((0x800000 | frac) >> shift)) as u16
         }
     } else {
         ((sign << 15) | (((exp + 15) as u32) << 10) | (frac >> 13)) as u16
