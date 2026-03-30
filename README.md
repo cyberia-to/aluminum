@@ -104,7 +104,7 @@ requires macOS with Metal-capable GPU.
 
 ## architecture
 
-```
+```text
 cyb/llm          inference runtime — models, graphs, scheduling
 cyb/llm/backend  jets — MSL kernels dispatched via aluminium
 aluminium          this crate — device, buffer, pipeline, dispatch

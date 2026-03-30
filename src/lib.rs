@@ -1,46 +1,4 @@
-//! `metal` — Pure Rust access to Apple Metal GPU
-//!
-//! Direct C-level access to Metal.framework via objc_msgSend FFI.
-//! Zero external dependencies. Only requires macOS with Metal support.
-//!
-//! ```no_run
-//! use aluminium::{MtlDevice, MetalError};
-//!
-//! let device = MtlDevice::system_default()?;
-//! let queue = device.new_command_queue()?;
-//!
-//! let source = r#"
-//!     #include <metal_stdlib>
-//!     kernel void add(device float *a [[buffer(0)]],
-//!                     device float *b [[buffer(1)]],
-//!                     device float *c [[buffer(2)]],
-//!                     uint id [[thread_position_in_grid]]) {
-//!         c[id] = a[id] + b[id];
-//!     }
-//! "#;
-//!
-//! let lib = device.new_library_with_source(source)?;
-//! let func = lib.get_function("add")?;
-//! let pipeline = device.new_compute_pipeline(&func)?;
-//!
-//! let n = 1024usize;
-//! let buf_a = device.new_buffer(n * 4)?;
-//! let buf_b = device.new_buffer(n * 4)?;
-//! let buf_c = device.new_buffer(n * 4)?;
-//!
-//! let cmd = queue.command_buffer()?;
-//! let enc = cmd.compute_encoder()?;
-//! enc.set_pipeline(&pipeline);
-//! enc.set_buffer(&buf_a, 0, 0);
-//! enc.set_buffer(&buf_b, 0, 1);
-//! enc.set_buffer(&buf_c, 0, 2);
-//! enc.dispatch_threads((n, 1, 1), (64, 1, 1));
-//! enc.end_encoding();
-//! cmd.commit();
-//! cmd.wait_until_completed();
-//! # Ok::<(), aluminium::MetalError>(())
-//! ```
-
+#![doc = include_str!("../README.md")]
 #![allow(
     non_camel_case_types,
     non_upper_case_globals,
@@ -87,18 +45,29 @@ where
     }
 }
 
+/// Errors returned by aluminium operations.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MetalError {
+    /// No Metal-capable GPU found on this system.
     DeviceNotFound,
+    /// GPU buffer allocation failed.
     BufferCreationFailed(String),
+    /// MSL shader compilation failed (includes compiler diagnostic).
     LibraryCompilationFailed(String),
+    /// Named function not found in compiled shader library.
     FunctionNotFound(String),
+    /// Compute pipeline creation failed.
     PipelineCreationFailed(String),
+    /// Command buffer execution failed.
     CommandBufferError(String),
+    /// Could not create a command encoder.
     EncoderCreationFailed,
+    /// Could not create a command queue.
     QueueCreationFailed,
+    /// Texture creation failed.
     TextureCreationFailed(String),
+    /// Filesystem I/O error.
     Io(std::io::Error),
 }
 

@@ -71,12 +71,12 @@ src/                  core library (zero deps)
   pipeline.rs         MtlComputePipeline, MtlRenderPipeline
   sync.rs             MtlFence, MtlEvent, MtlSharedEvent
   texture.rs          MtlTexture
-  probe/              metal_probe — 5-level capability probe
+  metal_probe.rs      metal_probe binary — 5-level capability probe
 examples/             runnable demos (vecadd, matmul)
 benches/              separate crate with heavy deps (bench, compare)
 docs/                 documentation (tutorial, guide, explanations)
 specs/                specification (source of truth)
-  api.md              API spec — concepts, lifecycle, apple mapping
+  README.md           API spec — concepts, lifecycle, apple mapping
 ```
 
 ## source of truth
