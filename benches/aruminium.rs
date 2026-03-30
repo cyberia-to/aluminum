@@ -1,6 +1,6 @@
-//! aluminium driver benchmarks — measures Metal.framework overhead
+//! aruminium driver benchmarks — measures Metal.framework overhead
 
-use aluminium::MtlDevice;
+use aruminium::MtlDevice;
 use std::time::Instant;
 
 use super::shaders::{NOOP as NOOP_SRC, SAXPY as SAXPY_SRC};
@@ -79,7 +79,7 @@ pub fn encode_unchecked(iters: usize) -> f64 {
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
-    let mut last_cmd = None::<aluminium::MtlCommandBuffer>;
+    let mut last_cmd = None::<aruminium::MtlCommandBuffer>;
     for _ in 0..iters {
         unsafe {
             let cmd = queue.command_buffer_unchecked();
@@ -99,7 +99,7 @@ pub fn encode_unchecked(iters: usize) -> f64 {
 }
 
 pub fn batch_encode(batch_size: usize, iters: usize) -> f64 {
-    use aluminium::ComputeDispatcher;
+    use aruminium::ComputeDispatcher;
     let dev = MtlDevice::system_default().unwrap();
     let queue = dev.new_command_queue().unwrap();
     let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
@@ -235,7 +235,7 @@ pub fn dispatch_autoreleased(iters: usize) -> f64 {
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
-    aluminium::autorelease_pool(|| {
+    aruminium::autorelease_pool(|| {
         for _ in 0..iters {
             unsafe {
                 let cmd = queue.command_buffer_autoreleased();
@@ -253,7 +253,7 @@ pub fn dispatch_autoreleased(iters: usize) -> f64 {
 }
 
 pub fn dispatch_raw(iters: usize) -> f64 {
-    use aluminium::ffi::*;
+    use aruminium::ffi::*;
     use std::ffi::c_void;
 
     let dev = MtlDevice::system_default().unwrap();
@@ -318,7 +318,7 @@ pub fn dispatch_raw(iters: usize) -> f64 {
 }
 
 pub fn dispatch_imp(iters: usize) -> f64 {
-    use aluminium::ComputeDispatcher;
+    use aruminium::ComputeDispatcher;
     let dev = MtlDevice::system_default().unwrap();
     let queue = dev.new_command_queue().unwrap();
     let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
@@ -338,7 +338,7 @@ pub fn dispatch_imp(iters: usize) -> f64 {
 }
 
 pub fn dispatch_pipelined(iters: usize) -> f64 {
-    use aluminium::ComputeDispatcher;
+    use aruminium::ComputeDispatcher;
     let dev = MtlDevice::system_default().unwrap();
     let queue = dev.new_command_queue().unwrap();
     let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
@@ -362,12 +362,12 @@ pub fn dispatch_pipelined(iters: usize) -> f64 {
             })
         };
         if let Some(p) = prev {
-            aluminium::GpuFuture::wait(p);
+            aruminium::GpuFuture::wait(p);
         }
         prev = Some(future);
     }
     if let Some(p) = prev {
-        aluminium::GpuFuture::wait(p);
+        aruminium::GpuFuture::wait(p);
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
@@ -422,7 +422,7 @@ pub fn large_compute(iters: usize, n: usize) -> f64 {
 }
 
 pub fn large_compute_imp(iters: usize, n: usize) -> f64 {
-    use aluminium::ComputeDispatcher;
+    use aruminium::ComputeDispatcher;
     let dev = MtlDevice::system_default().unwrap();
     let queue = dev.new_command_queue().unwrap();
     let lib = dev.new_library_with_source(SAXPY_SRC).unwrap();
@@ -471,7 +471,7 @@ pub fn large_compute_imp(iters: usize, n: usize) -> f64 {
 }
 
 pub fn inference_sim(layers: usize, iters: usize) -> f64 {
-    use aluminium::ComputeDispatcher;
+    use aruminium::ComputeDispatcher;
     let dev = MtlDevice::system_default().unwrap();
     let queue = dev.new_command_queue().unwrap();
     let src = r#"
@@ -520,9 +520,9 @@ pub fn inference_sim(layers: usize, iters: usize) -> f64 {
 // ── helpers ──
 
 fn warmup(
-    queue: &aluminium::MtlCommandQueue,
-    pipe: &aluminium::MtlComputePipeline,
-    buf: &aluminium::MtlBuffer,
+    queue: &aruminium::MtlCommandQueue,
+    pipe: &aruminium::MtlComputePipeline,
+    buf: &aruminium::MtlBuffer,
 ) {
     for _ in 0..10 {
         let cmd = queue.command_buffer().unwrap();
@@ -538,13 +538,13 @@ fn warmup(
 
 #[allow(clippy::too_many_arguments)]
 unsafe fn dispatch_layers(
-    disp: &aluminium::ComputeDispatcher,
-    matmul: &aluminium::MtlComputePipeline,
-    relu: &aluminium::MtlComputePipeline,
-    add: &aluminium::MtlComputePipeline,
-    buf_a: &aluminium::MtlBuffer,
-    buf_b: &aluminium::MtlBuffer,
-    buf_c: &aluminium::MtlBuffer,
+    disp: &aruminium::ComputeDispatcher,
+    matmul: &aruminium::MtlComputePipeline,
+    relu: &aruminium::MtlComputePipeline,
+    add: &aruminium::MtlComputePipeline,
+    buf_a: &aruminium::MtlBuffer,
+    buf_b: &aruminium::MtlBuffer,
+    buf_c: &aruminium::MtlBuffer,
     n: usize,
     layers: usize,
 ) {

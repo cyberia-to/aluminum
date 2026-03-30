@@ -8,10 +8,10 @@ edition = "2021"
 license = "LicenseRef-Cyber"
 
 [workspace.dependencies]
-cyb-aluminium = { path = "." }
+cyb-aruminium = { path = "." }
 
 [package]
-name = "cyb-aluminium"
+name = "cyb-aruminium"
 description = "Pure Rust Apple Metal GPU driver — zero deps, direct objc_msgSend FFI"
 version.workspace = true
 edition.workspace = true
@@ -23,7 +23,7 @@ categories = ["os::macos-apis", "graphics", "hardware-support"]
 readme = "README.md"
 
 [lib]
-name = "aluminium"
+name = "aruminium"
 path = "src/lib.rs"
 
 [[bin]]

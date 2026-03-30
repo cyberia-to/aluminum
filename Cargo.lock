@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cyb-aluminium"
+name = "cyb-aruminium"
 version = "0.1.0"
 
 [[package]]
@@ -41,7 +41,7 @@ checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 name = "metal-benches"
 version = "0.1.0"
 dependencies = [
- "cyb-aluminium",
+ "cyb-aruminium",
  "objc2",
  "objc2-foundation",
  "objc2-metal",

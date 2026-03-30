@@ -1,6 +1,6 @@
 //! Integration tests — full GPU pipeline: compile → dispatch → verify
 
-use aluminium::{autorelease_pool, ComputeDispatcher, MetalError, MtlDevice};
+use aruminium::{autorelease_pool, ComputeDispatcher, MetalError, MtlDevice};
 
 #[test]
 fn vecadd_1024() -> Result<(), MetalError> {
@@ -213,12 +213,12 @@ fn compute_dispatcher_async_pipelining() -> Result<(), MetalError> {
             })
         };
         if let Some(p) = prev {
-            aluminium::GpuFuture::wait(p);
+            aruminium::GpuFuture::wait(p);
         }
         prev = Some(future);
     }
     if let Some(p) = prev {
-        aluminium::GpuFuture::wait(p);
+        aruminium::GpuFuture::wait(p);
     }
 
     buf.with_f32(|d| {

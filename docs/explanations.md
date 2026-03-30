@@ -1,15 +1,15 @@
 # explanations
 
-how aluminium works and why it's built this way.
+how aruminium works and why it's built this way.
 
 ## why direct FFI
 
 Metal.framework is an ObjC API. the standard Rust approach is objc2-metal
-(safe wrappers over ObjC runtime). aluminium bypasses this entirely:
+(safe wrappers over ObjC runtime). aruminium bypasses this entirely:
 
 ```
 objc2-metal:   Rust -> objc2 runtime -> ObjC protocol wrappers -> Metal.framework
-aluminium:     Rust -> objc_msgSend (transmuted fn pointers) -> Metal.framework
+aruminium:     Rust -> objc_msgSend (transmuted fn pointers) -> Metal.framework
 ```
 
 one less layer. no ObjC protocol conformance checks, no dynamic dispatch
@@ -82,7 +82,7 @@ Metal objects follow ObjC retain/release semantics:
 - `commandBuffer` returns **autoreleased** (runtime owns temporarily)
 - `objc_retain` / `objc_release` are direct C calls (not msg_send)
 
-aluminium tracks ownership with `owned: bool` on command buffers
+aruminium tracks ownership with `owned: bool` on command buffers
 and encoders. `Drop` only calls `release` on owned objects.
 
 five command buffer variants trade safety for speed:
@@ -153,9 +153,9 @@ hides encoding latency completely.
 ```
 cyb-llm          inference runtime (graphs, models, scheduling)
 cyb-llm/backend  Metal backend (MSL shaders, jet dispatch, frame allocator)
-aluminium        this crate (device, buffer, pipeline, dispatch)
+aruminium        this crate (device, buffer, pipeline, dispatch)
 ```
 
-aluminium does not know about models, operations, or shaders.
+aruminium does not know about models, operations, or shaders.
 it provides the Metal.framework API surface that the backend needs.
-one-way dependency: cyb-llm depends on aluminium, not the reverse.
+one-way dependency: cyb-llm depends on aruminium, not the reverse.

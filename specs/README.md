@@ -1,4 +1,4 @@
-# aluminium — API specification
+# aruminium — API specification
 
 pure Rust driver for Apple Metal GPU. direct objc_msgSend FFI,
 zero external dependencies, only macOS system frameworks.
@@ -393,7 +393,7 @@ Io(io::Error)               filesystem error
 ## driver stack
 
 ```
-aluminium crate (objc_msgSend FFI + IMP resolution)
+aruminium crate (objc_msgSend FFI + IMP resolution)
   -> Metal.framework (linked at build time)
     -> GPU driver
       -> GPU hardware

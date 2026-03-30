@@ -1,11 +1,11 @@
 # guide
 
-practical patterns for using aluminium.
+practical patterns for using aruminium.
 
 ## device setup
 
 ```rust
-use aluminium::{MtlDevice, MetalError};
+use aruminium::{MtlDevice, MetalError};
 
 let device = MtlDevice::system_default()?;
 println!("{}, unified={}, max_buf={}MB",
@@ -131,7 +131,7 @@ since device boot. `gpu_time()` = end - start.
 for repeated dispatches (inference decode loop), use `ComputeDispatcher`:
 
 ```rust
-use aluminium::ComputeDispatcher;
+use aruminium::ComputeDispatcher;
 
 let disp = ComputeDispatcher::new(&queue);
 
@@ -188,7 +188,7 @@ if let Some(p) = prev { p.wait(); }
 ### raw batch (caller manages autorelease pool)
 
 ```rust
-aluminium::autorelease_pool(|| {
+aruminium::autorelease_pool(|| {
     for step in 0..decode_steps {
         unsafe {
             disp.dispatch_batch_raw(|batch| {
@@ -204,7 +204,7 @@ one pool for the entire loop instead of per-batch.
 ## fp16 conversion
 
 ```rust
-use aluminium::{fp16_to_f32, f32_to_fp16, cvt_f16_f32, cvt_f32_f16};
+use aruminium::{fp16_to_f32, f32_to_fp16, cvt_f16_f32, cvt_f32_f16};
 
 // single value
 let half: u16 = f32_to_fp16(3.14);

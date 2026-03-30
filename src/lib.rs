@@ -52,7 +52,7 @@ where
     f()
 }
 
-/// Errors returned by aluminium operations.
+/// Errors returned by aruminium operations.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MetalError {

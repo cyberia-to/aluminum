@@ -1,11 +1,11 @@
-# aluminium
+# aruminium
 
 the lightest metal.
 
 pure Rust Apple Metal GPU driver. zero external dependencies. direct `objc_msgSend` FFI to Metal.framework — no objc runtime, no Swift, no headers.
 
 ```rust,ignore
-let device = aluminium::MtlDevice::system_default()?;
+let device = aruminium::MtlDevice::system_default()?;
 let queue = device.new_command_queue()?;
 
 let lib = device.new_library_with_source(r#"
@@ -52,7 +52,7 @@ inference sim:   1.11x faster (300 layers)
 SAXPY:           143 vs 140 GB/s
 ```
 
-same GPU, same work. aluminium is lighter.
+same GPU, same work. aruminium is lighter.
 
 ## api
 
@@ -88,8 +88,8 @@ cmd.gpu_time() -> f64
 pipeline.static_threadgroup_memory_length() -> usize
 
 // fp16
-aluminium::f32_to_fp16(f32) -> u16
-aluminium::fp16_to_f32(u16) -> f32
+aruminium::f32_to_fp16(f32) -> u16
+aruminium::fp16_to_f32(u16) -> f32
 ```
 
 ## build
@@ -106,11 +106,11 @@ requires macOS with Metal-capable GPU.
 
 ```text
 cyb/llm          inference runtime — models, graphs, scheduling
-cyb/llm/backend  jets — MSL kernels dispatched via aluminium
-aluminium          this crate — device, buffer, pipeline, dispatch
+cyb/llm/backend  jets — MSL kernels dispatched via aruminium
+aruminium          this crate — device, buffer, pipeline, dispatch
 ```
 
-aluminium does not depend on cyb/llm. cyb/llm depends on aluminium. one way.
+aruminium does not depend on cyb/llm. cyb/llm depends on aruminium. one way.
 
 ## license
 

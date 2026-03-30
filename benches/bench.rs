@@ -1,9 +1,9 @@
-//! aluminium driver benchmark — buffer, dispatch, fp16 conversion
+//! aruminium driver benchmark — buffer, dispatch, fp16 conversion
 //!
 //! Layer 1 only: measures hardware driver performance.
 //! No matmul, no attention, no model knowledge.
 
-use aluminium::{MetalError, MtlDevice};
+use aruminium::{MetalError, MtlDevice};
 use std::time::Instant;
 
 fn main() -> Result<(), MetalError> {
@@ -104,19 +104,19 @@ fn main() -> Result<(), MetalError> {
     // ── fp16 conversion benchmark ──
     let n16 = 16 * 1024 * 1024;
     let src16: Vec<u16> = (0..n16)
-        .map(|i| aluminium::f32_to_fp16(i as f32 * 0.001))
+        .map(|i| aruminium::f32_to_fp16(i as f32 * 0.001))
         .collect();
     let mut dst32 = vec![0.0f32; n16];
     let mut dst16 = vec![0u16; n16];
     let src32: Vec<f32> = (0..n16).map(|i| i as f32 * 0.001).collect();
 
-    aluminium::cvt_f16_f32(&mut dst32, &src16);
-    aluminium::cvt_f32_f16(&mut dst16, &src32);
+    aruminium::cvt_f16_f32(&mut dst32, &src16);
+    aruminium::cvt_f32_f16(&mut dst16, &src32);
 
     let iters = 20;
     let t0 = Instant::now();
     for _ in 0..iters {
-        aluminium::cvt_f16_f32(&mut dst32, &src16);
+        aruminium::cvt_f16_f32(&mut dst32, &src16);
     }
     let dt = t0.elapsed();
     let bw = (n16 as f64 * (2 + 4) as f64 * iters as f64) / dt.as_secs_f64() / 1e9;
@@ -129,7 +129,7 @@ fn main() -> Result<(), MetalError> {
 
     let t0 = Instant::now();
     for _ in 0..iters {
-        aluminium::cvt_f32_f16(&mut dst16, &src32);
+        aruminium::cvt_f32_f16(&mut dst16, &src32);
     }
     let dt = t0.elapsed();
     let bw = (n16 as f64 * (4 + 2) as f64 * iters as f64) / dt.as_secs_f64() / 1e9;

@@ -1,4 +1,4 @@
-//! Unit tests for aluminium
+//! Unit tests for aruminium
 
 #[cfg(test)]
 mod fp16_tests {

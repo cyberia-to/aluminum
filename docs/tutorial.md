@@ -1,6 +1,6 @@
 # tutorial
 
-step-by-step: from zero to GPU compute in aluminium.
+step-by-step: from zero to GPU compute in aruminium.
 
 ## prerequisites
 
@@ -14,17 +14,17 @@ cargo new my-gpu-app
 cd my-gpu-app
 ```
 
-add aluminium to `Cargo.toml`:
+add aruminium to `Cargo.toml`:
 
 ```toml
 [dependencies]
-aluminium = { path = "../aluminium" }  # or git URL
+aruminium = { path = "../aruminium" }  # or git URL
 ```
 
 ## step 2: discover the GPU
 
 ```rust
-use aluminium::{MtlDevice, MetalError};
+use aruminium::{MtlDevice, MetalError};
 
 fn main() -> Result<(), MetalError> {
     let device = MtlDevice::system_default()?;
@@ -170,7 +170,7 @@ kernel void my_kernel(constant Params &p [[buffer(3)]],
 ## complete example
 
 ```rust
-use aluminium::{MtlDevice, MetalError};
+use aruminium::{MtlDevice, MetalError};
 
 fn main() -> Result<(), MetalError> {
     let device = MtlDevice::system_default()?;

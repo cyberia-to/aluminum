@@ -1,6 +1,6 @@
 //! metal_probe — Metal GPU discovery and capability probe
 
-use aluminium::{MetalError, MtlDevice};
+use aruminium::{MetalError, MtlDevice};
 
 fn main() -> Result<(), MetalError> {
     println!("=== Metal Probe ===\n");

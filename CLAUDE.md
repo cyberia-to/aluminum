@@ -39,7 +39,7 @@ cargo run --example vecadd                # verify Metal access
 
 every commit: format clean, clippy clean, builds, examples run.
 
-## project: aluminium
+## project: aruminium
 
 pure Rust driver for Apple Metal GPU. compile shaders, create pipelines,
 dispatch compute and render work on GPU hardware. zero external
@@ -49,7 +49,7 @@ dependencies in the core crate — only macOS system frameworks.
 
 cargo workspace with two members:
 
-- `aluminium` (root crate) — library + metal_probe binary + examples.
+- `aruminium` (root crate) — library + metal_probe binary + examples.
   zero external dependencies. links only system frameworks via FFI.
 - `benches/` (crate `metal-benches`) — CLI binaries (bench, compare).
   heavy dependencies isolated here.

@@ -1,6 +1,6 @@
 //! Vector addition on Metal GPU — minimal compute example
 
-use aluminium::{MetalError, MtlDevice};
+use aruminium::{MetalError, MtlDevice};
 
 fn main() -> Result<(), MetalError> {
     let device = MtlDevice::system_default()?;
