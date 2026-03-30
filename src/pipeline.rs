@@ -22,6 +22,11 @@ impl MtlComputePipeline {
         unsafe { msg0_usize(self.raw, SEL_threadExecutionWidth()) }
     }
 
+    /// Static threadgroup memory length used by this pipeline (bytes).
+    pub fn static_threadgroup_memory_length(&self) -> usize {
+        unsafe { msg0_usize(self.raw, SEL_staticThreadgroupMemoryLength()) }
+    }
+
     pub fn as_raw(&self) -> ObjcId {
         self.raw
     }

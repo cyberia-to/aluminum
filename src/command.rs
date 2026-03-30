@@ -191,6 +191,33 @@ impl MtlCommandBuffer {
         nserror_string(err)
     }
 
+    /// GPU start time in seconds (absolute, from device boot).
+    /// Only valid after command buffer completes.
+    pub fn gpu_start_time(&self) -> f64 {
+        unsafe {
+            let sel = SEL_GPUStartTime();
+            let f: extern "C" fn(ObjcId, ObjcSel) -> f64 =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(self.raw, sel)
+        }
+    }
+
+    /// GPU end time in seconds (absolute, from device boot).
+    /// Only valid after command buffer completes.
+    pub fn gpu_end_time(&self) -> f64 {
+        unsafe {
+            let sel = SEL_GPUEndTime();
+            let f: extern "C" fn(ObjcId, ObjcSel) -> f64 =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(self.raw, sel)
+        }
+    }
+
+    /// GPU execution time in seconds. Call after wait_until_completed().
+    pub fn gpu_time(&self) -> f64 {
+        self.gpu_end_time() - self.gpu_start_time()
+    }
+
     pub fn as_raw(&self) -> ObjcId {
         self.raw
     }

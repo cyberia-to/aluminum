@@ -204,6 +204,14 @@ cached_sel!(
     c"maxTotalThreadsPerThreadgroup"
 );
 cached_sel!(SEL_threadExecutionWidth, c"threadExecutionWidth");
+cached_sel!(
+    SEL_staticThreadgroupMemoryLength,
+    c"staticThreadgroupMemoryLength"
+);
+
+// Command buffer timing selectors
+cached_sel!(SEL_GPUStartTime, c"GPUStartTime");
+cached_sel!(SEL_GPUEndTime, c"GPUEndTime");
 
 // Collection selectors
 cached_sel!(SEL_count, c"count");

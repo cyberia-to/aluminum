@@ -25,3 +25,7 @@ path = "quant_bench.rs"
 [[bin]]
 name = "moonshot"
 path = "moonshot.rs"
+
+[[bin]]
+name = "profile"
+path = "profile.rs"
