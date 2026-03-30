@@ -4,7 +4,7 @@ the lightest metal.
 
 pure Rust Apple Metal GPU driver. zero external dependencies. direct `objc_msgSend` FFI to Metal.framework — no objc runtime, no Swift, no headers.
 
-```rust
+```rust,ignore
 let device = aluminium::MtlDevice::system_default()?;
 let queue = device.new_command_queue()?;
 
@@ -35,7 +35,7 @@ cmd.wait_until_completed();
 
 M1 Pro 16-core:
 
-```
+```text
 buffer create (1 MB):     0.01 ms
 shader compile:           0.01 ms
 dispatch overhead:        0.21 ms CPU / 0.18 ms GPU
@@ -45,7 +45,7 @@ fp16 conversion:          58-72 GB/s
 
 vs objc2-metal (standard Rust Metal binding):
 
-```
+```text
 batch encode:    1.13x faster
 pipelined:       1.79x faster
 inference sim:   1.11x faster (300 layers)
@@ -56,7 +56,7 @@ same GPU, same work. aluminium is lighter.
 
 ## api
 
-```rust
+```rust,ignore
 // device
 MtlDevice::system_default() -> Result<MtlDevice>
 device.name() -> String
@@ -94,7 +94,7 @@ aluminium::fp16_to_f32(u16) -> f32
 
 ## build
 
-```
+```text
 cargo build --release
 cargo run --example vecadd
 cargo run --release -p metal-benches --bin bench
