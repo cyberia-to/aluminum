@@ -378,11 +378,13 @@ impl GpuFuture {
     /// Block until the GPU finishes executing this command buffer.
     #[inline(always)]
     pub fn wait(self) {
+        let cmd = self.cmd;
+        let sel = self.sel_wait;
+        std::mem::forget(self); // disarm Drop first — leak on panic, not double-free
         unsafe {
-            msg0_void(self.cmd, self.sel_wait);
-            objc_release(self.cmd);
+            msg0_void(cmd, sel);
+            objc_release(cmd);
         }
-        std::mem::forget(self); // prevent Drop from double-releasing
     }
 }
 

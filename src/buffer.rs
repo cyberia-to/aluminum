@@ -36,8 +36,11 @@ impl MtlBuffer {
     }
 
     /// Raw pointer to buffer contents. Cached — no ObjC call after first access.
+    /// Restricted to crate — external code uses closure API (with_data, with_f32, etc.)
+    /// to prevent pointer from outliving the buffer.
     #[inline(always)]
-    pub fn contents(&self) -> *mut c_void {
+    #[allow(dead_code)]
+    pub(crate) fn contents(&self) -> *mut c_void {
         self.ptr
     }
 
