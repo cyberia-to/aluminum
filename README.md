@@ -83,6 +83,9 @@ enc.end_encoding()
 cmd.commit()
 cmd.wait_until_completed()
 
+// sync
+MtlFence, MtlEvent, MtlSharedEvent
+
 // profiling
 cmd.gpu_time() -> f64
 pipeline.static_threadgroup_memory_length() -> usize
@@ -90,6 +93,8 @@ pipeline.static_threadgroup_memory_length() -> usize
 // fp16
 aruminium::f32_to_fp16(f32) -> u16
 aruminium::fp16_to_f32(u16) -> f32
+aruminium::cvt_f32_to_f16(&[f32], &mut [u16])  // bulk NEON
+aruminium::cvt_f16_to_f32(&[u16], &mut [f32])  // bulk NEON
 ```
 
 ## build
@@ -97,20 +102,11 @@ aruminium::fp16_to_f32(u16) -> f32
 ```text
 cargo build --release
 cargo run --example vecadd
+cargo run --example matmul
 cargo run --release -p metal-benches --bin bench
 ```
 
 requires macOS with Metal-capable GPU.
-
-## architecture
-
-```text
-cyb/llm          inference runtime — models, graphs, scheduling
-cyb/llm/backend  jets — MSL kernels dispatched via aruminium
-aruminium          this crate — device, buffer, pipeline, dispatch
-```
-
-aruminium does not depend on cyb/llm. cyb/llm depends on aruminium. one way.
 
 ## license
 

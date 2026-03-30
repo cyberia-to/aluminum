@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "LicenseRef-Cyber"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 cyb-aruminium = { path = "." }
@@ -15,9 +15,9 @@ name = "cyb-aruminium"
 description = "Pure Rust Apple Metal GPU driver — zero deps, direct objc_msgSend FFI"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
-repository = "https://github.com/cybercongress/cyb"
-homepage = "https://github.com/cybercongress/cyb"
+license-file.workspace = true
+repository = "https://github.com/cyberia-to/aruminium"
+homepage = "https://github.com/cyberia-to/aruminium"
 keywords = ["metal", "gpu", "apple", "compute", "macos"]
 categories = ["os::macos-apis", "graphics", "hardware-support"]
 readme = "README.md"
