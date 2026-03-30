@@ -43,13 +43,17 @@ fn main() -> Result<(), MetalError> {
     println!("\n=== #8: 3×2 accumulator (BM=48 BN=64) ===");
     bench_3x2_acc(&device, &queue, &a, &b, &c, dim)?;
 
-    // #3: stream-K (non-square)
+    // #3: stream-K (non-square) — REAL implementation
     println!("\n=== #3: stream-K (512×4096 × 4096×11008) ===");
-    bench_stream_k(&device, &queue)?;
+    bench_stream_k_impl(&device, &queue)?;
 
     // #10: parallel sub-matmuls
     println!("\n=== #10: parallel sub-matmuls ===");
     bench_parallel_split(&device, &queue, &a, &b, &c, dim)?;
+
+    // C.3 + #9: core tuning + mixed precision
+    println!("\n=== C.3 + #9: core tuning + mixed precision ===");
+    bench_core_tuning(&device, &queue)?;
 
     Ok(())
 }
@@ -954,4 +958,364 @@ fn run_matmul(
     }
     let dt = t0.elapsed().as_secs_f64() / iters as f64;
     Ok((2.0 * m as f64 * n as f64 * k as f64) / dt / 1e9)
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Stream-K: split K across threadgroups, atomic accumulate
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+fn bench_stream_k_impl(
+    device: &MtlDevice,
+    queue: &metal::MtlCommandQueue,
+) -> Result<(), MetalError> {
+    // Non-square: 512×4096 × 4096×11008 (Llama 7B FFN prefill)
+    let m = 512usize;
+    let n = 11008;
+    let k = 4096;
+
+    let a = device.new_buffer(m * k * 2)?;
+    let b = device.new_buffer(k * n * 2)?;
+    // Output in FLOAT for atomic accumulation
+    let c_f32 = device.new_buffer(m * n * 4)?;
+    init_half(&a, m * k);
+    init_half(&b, k * n);
+
+    // Baseline: standard tiling
+    let c_base = device.new_buffer(m * n * 2)?;
+    let gf_base = run_matmul(
+        device,
+        queue,
+        BEST_KERNEL,
+        "gemm_best",
+        &a,
+        &b,
+        &c_base,
+        m,
+        n,
+        k,
+        10,
+    )?;
+    println!("  baseline {m}×{k} × {k}×{n}: {:.0} GFLOPS", gf_base);
+    println!(
+        "  tiles: {}×{} = {} ({:.1} tiles/core)",
+        m >> 6,
+        n >> 6,
+        (m >> 6) * (n >> 6),
+        ((m >> 6) * (n >> 6)) as f64 / 16.0
+    );
+
+    // Stream-K: split K into K_SPLIT parts
+    for &k_split in &[2usize, 4, 8] {
+        let k_per_part = k / (32 * k_split); // K-iterations per part (in units of BK=32)
+
+        let src = format!(
+            r#"
+            #include <metal_stdlib>
+            #include <metal_simdgroup_matrix>
+            #include <metal_atomic>
+            using namespace metal;
+            struct P {{ uint M; uint N; uint K; uint k_start; uint k_end; }};
+
+            kernel void gemm_sk(device const half *A          [[buffer(0)]],
+                                device const half *B           [[buffer(1)]],
+                                device atomic_float *C         [[buffer(2)]],
+                                constant P &p                  [[buffer(3)]],
+                                uint2 group_id [[threadgroup_position_in_grid]],
+                                uint sgid [[simdgroup_index_in_threadgroup]],
+                                uint lid [[thread_index_in_threadgroup]]) {{
+
+                threadgroup half tA[64][33];
+                threadgroup half tB[32][66];
+                uint grow = group_id.y << 6u;
+                uint gcol = group_id.x << 6u;
+                uint sg_row = (sgid >> 2u) << 4u;
+                uint sg_col = (sgid & 3u) << 4u;
+
+                simdgroup_float8x8 acc[2][2];
+                for (uint i = 0; i < 2u; i++)
+                    for (uint j = 0; j < 2u; j++)
+                        acc[i][j] = make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+                device const half4 *A4 = (device const half4 *)A;
+                device const half4 *B4 = (device const half4 *)B;
+                uint a4s = p.K >> 2u;
+                uint b4s = p.N >> 2u;
+
+                for (uint t = p.k_start; t < p.k_end; t += 32u) {{
+                    {{
+                        uint r = lid >> 3u;
+                        uint c4 = lid & 7u;
+                        half4 v = A4[(grow + r) * a4s + (t >> 2u) + c4];
+                        uint bc = c4 << 2u;
+                        tA[r][bc] = v.x; tA[r][bc+1] = v.y;
+                        tA[r][bc+2] = v.z; tA[r][bc+3] = v.w;
+                    }}
+                    {{
+                        uint r = lid >> 4u;
+                        uint c4 = lid & 15u;
+                        half4 v = B4[(t + r) * b4s + (gcol >> 2u) + c4];
+                        uint bc = c4 << 2u;
+                        tB[r][bc] = v.x; tB[r][bc+1] = v.y;
+                        tB[r][bc+2] = v.z; tB[r][bc+3] = v.w;
+                    }}
+                    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+                    for (uint kk = 0; kk < 32u; kk += 8u) {{
+                        simdgroup_half8x8 at[2], bt[2];
+                        for (uint i = 0; i < 2u; i++)
+                            simdgroup_load(at[i], &tA[sg_row + i*8u][kk], 33);
+                        for (uint j = 0; j < 2u; j++)
+                            simdgroup_load(bt[j], &tB[kk][sg_col + j*8u], 66);
+                        for (uint i = 0; i < 2u; i++)
+                            for (uint j = 0; j < 2u; j++)
+                                simdgroup_multiply_accumulate(acc[i][j], at[i], bt[j], acc[i][j]);
+                    }}
+                    threadgroup_barrier(mem_flags::mem_threadgroup);
+                }}
+
+                // Atomic store: each thread writes its fragment via atomic_fetch_add
+                // simdgroup_store to threadgroup, then threads atomically add to device
+                threadgroup float staging[16][16];
+                for (uint i = 0; i < 2u; i++) {{
+                    for (uint j = 0; j < 2u; j++) {{
+                        simdgroup_store(acc[i][j], &staging[i*8u][j*8u], 16);
+                        threadgroup_barrier(mem_flags::mem_threadgroup);
+                        // Each thread in first 64 adds one element
+                        if (lid < 64u) {{
+                            uint sr = lid >> 3u;  // 0..7
+                            uint sc = lid & 7u;   // 0..7
+                            uint gr = grow + sg_row + i*8u + sr;
+                            uint gc = gcol + sg_col + j*8u + sc;
+                            if (gr < p.M && gc < p.N) {{
+                                atomic_fetch_add_explicit(
+                                    C + gr * p.N + gc,
+                                    staging[i*8u + sr][j*8u + sc],
+                                    memory_order_relaxed);
+                            }}
+                        }}
+                        threadgroup_barrier(mem_flags::mem_threadgroup);
+                    }}
+                }}
+            }}
+        "#
+        );
+
+        // Zero output
+        c_f32.with_data_mut(|d| {
+            for v in d.iter_mut() {
+                *v = 0;
+            }
+        });
+
+        // Dispatch k_split passes
+        let lib = device.new_library_with_source(&src)?;
+        let pipe = device.new_compute_pipeline(&lib.get_function("gemm_sk")?)?;
+
+        let grid = (n.div_ceil(64), m.div_ceil(64), 1);
+        let group = (512, 1, 1);
+
+        // Warmup
+        for _ in 0..3 {
+            c_f32.with_data_mut(|d| {
+                for v in d.iter_mut() {
+                    *v = 0;
+                }
+            });
+            for part in 0..k_split {
+                let k_start = (part * k_per_part * 32) as u32;
+                let k_end = ((part + 1) * k_per_part * 32) as u32;
+
+                #[repr(C)]
+                struct Psk {
+                    m: u32,
+                    n: u32,
+                    k: u32,
+                    k_start: u32,
+                    k_end: u32,
+                }
+                let params = Psk {
+                    m: m as u32,
+                    n: n as u32,
+                    k: k as u32,
+                    k_start,
+                    k_end,
+                };
+                let pb = unsafe {
+                    std::slice::from_raw_parts(
+                        &params as *const Psk as *const u8,
+                        std::mem::size_of::<Psk>(),
+                    )
+                };
+
+                let cmd = queue.command_buffer()?;
+                let enc = cmd.compute_encoder()?;
+                enc.set_pipeline(&pipe);
+                enc.set_buffer(&a, 0, 0);
+                enc.set_buffer(&b, 0, 1);
+                enc.set_buffer(&c_f32, 0, 2);
+                enc.set_bytes(pb, 3);
+                enc.dispatch_threadgroups(grid, group);
+                enc.end_encoding();
+                cmd.commit();
+                cmd.wait_until_completed();
+            }
+        }
+
+        // Benchmark
+        let iters = 5;
+        let t0 = Instant::now();
+        for _ in 0..iters {
+            c_f32.with_data_mut(|d| {
+                for v in d.iter_mut() {
+                    *v = 0;
+                }
+            });
+            for part in 0..k_split {
+                let k_start = (part * k_per_part * 32) as u32;
+                let k_end = ((part + 1) * k_per_part * 32) as u32;
+
+                #[repr(C)]
+                struct Psk {
+                    m: u32,
+                    n: u32,
+                    k: u32,
+                    k_start: u32,
+                    k_end: u32,
+                }
+                let params = Psk {
+                    m: m as u32,
+                    n: n as u32,
+                    k: k as u32,
+                    k_start,
+                    k_end,
+                };
+                let pb = unsafe {
+                    std::slice::from_raw_parts(
+                        &params as *const Psk as *const u8,
+                        std::mem::size_of::<Psk>(),
+                    )
+                };
+
+                let cmd = queue.command_buffer()?;
+                let enc = cmd.compute_encoder()?;
+                enc.set_pipeline(&pipe);
+                enc.set_buffer(&a, 0, 0);
+                enc.set_buffer(&b, 0, 1);
+                enc.set_buffer(&c_f32, 0, 2);
+                enc.set_bytes(pb, 3);
+                enc.dispatch_threadgroups(grid, group);
+                enc.end_encoding();
+                cmd.commit();
+                cmd.wait_until_completed();
+            }
+        }
+        let dt = t0.elapsed().as_secs_f64() / iters as f64;
+        let gf = (2.0 * m as f64 * n as f64 * k as f64) / dt / 1e9;
+        let tiles = (m.div_ceil(64)) * (n.div_ceil(64));
+        println!("  stream-K split={k_split}: {:.0} GFLOPS ({} tiles × {k_split} = {} dispatches, {:.1} tiles/core)",
+            gf, tiles, tiles * k_split, (tiles * k_split) as f64 / 16.0);
+    }
+
+    Ok(())
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C.3: tune grid for 16 cores + #9 mixed precision check
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+fn bench_core_tuning(device: &MtlDevice, queue: &metal::MtlCommandQueue) -> Result<(), MetalError> {
+    // Test different matrix sizes to find where 16-core alignment helps
+    println!("  Grid alignment test (tile count mod 16):");
+
+    for &(m, n, k) in &[
+        (2048usize, 2048, 2048), // 1024 tiles, 1024%16=0 ✓
+        (2048, 2048, 4096),      // 1024 tiles, K=4096
+        (1024, 1024, 4096),      // 256 tiles, 256%16=0 ✓
+        (512, 4096, 4096),       // 8×64=512 tiles, 512%16=0 ✓
+        (512, 11008, 4096),      // 8×172=1376 tiles, 1376%16=0? 1376/16=86 ✓
+        (768, 4096, 4096),       // 12×64=768 tiles, 768%16=0 ✓
+        (384, 4096, 4096),       // 6×64=384 tiles, 384%16=0 ✓
+        (320, 4096, 4096),       // 5×64=320 tiles, 320%16=0 ✓
+    ] {
+        let a = device.new_buffer(m * k * 2)?;
+        let b = device.new_buffer(k * n * 2)?;
+        let c = device.new_buffer(m * n * 2)?;
+        init_half(&a, m * k);
+        init_half(&b, k * n);
+
+        let gf = run_matmul(
+            device,
+            queue,
+            BEST_KERNEL,
+            "gemm_best",
+            &a,
+            &b,
+            &c,
+            m,
+            n,
+            k,
+            10,
+        )?;
+        let tiles_m = m.div_ceil(64);
+        let tiles_n = n.div_ceil(64);
+        let total = tiles_m * tiles_n;
+        let aligned = if total % 16 == 0 { "✓" } else { "✗" };
+        let per_core = total as f64 / 16.0;
+
+        println!("    {m:>4}×{n:>5}×{k}: {tiles_m:>2}×{tiles_n:>3} = {total:>5} tiles ({per_core:>5.1}/core) {aligned}  {:.0} GFLOPS", gf);
+    }
+
+    // #9: verify mixed precision — half acc vs float acc
+    println!("\n  Mixed precision check (2048×2048):");
+    let dim = 2048;
+    let a = device.new_buffer(dim * dim * 2)?;
+    let b = device.new_buffer(dim * dim * 2)?;
+    let c = device.new_buffer(dim * dim * 2)?;
+    init_half(&a, dim * dim);
+    init_half(&b, dim * dim);
+
+    // half acc (our kernel)
+    let gf_half = run_matmul(
+        device,
+        queue,
+        BEST_KERNEL,
+        "gemm_best",
+        &a,
+        &b,
+        &c,
+        dim,
+        dim,
+        dim,
+        10,
+    )?;
+
+    // float acc
+    let float_kernel = BEST_KERNEL
+        .replace("simdgroup_half8x8", "simdgroup_float8x8")
+        .replace(
+            "make_filled_simdgroup_matrix<half, 8>(half(0))",
+            "make_filled_simdgroup_matrix<float, 8>(0.0f)",
+        )
+        .replace("gemm_best", "gemm_f32acc");
+    // output buffer needs to be float
+    let c_f32 = device.new_buffer(dim * dim * 4)?;
+    let gf_f32 = run_matmul(
+        device,
+        queue,
+        &float_kernel,
+        "gemm_f32acc",
+        &a,
+        &b,
+        &c_f32,
+        dim,
+        dim,
+        dim,
+        10,
+    )?;
+
+    println!("    half acc:  {:.0} GFLOPS", gf_half);
+    println!("    float acc: {:.0} GFLOPS", gf_f32);
+    println!("    delta: {:.1}%", (gf_half - gf_f32) / gf_f32 * 100.0);
+
+    Ok(())
 }
