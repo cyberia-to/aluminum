@@ -583,6 +583,373 @@ fn main() -> Result<(), MetalError> {
             Err(e) => println!("  opt: FAIL: {e}"),
         }
 
+        // ── MOONSHOT #1+#2: software-pipelined MMA + async-style double buffer ──
+        println!("\n  === MOONSHOT: pipelined MMA + dual accumulator ===");
+        {
+            // Key insight: interleave simdgroup_load with simdgroup_multiply_accumulate.
+            // Also: process TWO K-blocks with TWO sets of accumulators,
+            // so while one set computes, the other set's data loads.
+            let moon_src = r#"
+                #include <metal_stdlib>
+                #include <metal_simdgroup_matrix>
+                using namespace metal;
+                struct P { uint M; uint N; uint K; };
+
+                kernel void gemm_moon(device const half *A [[buffer(0)]],
+                                      device const half *B [[buffer(1)]],
+                                      device half *C       [[buffer(2)]],
+                                      constant P &p        [[buffer(3)]],
+                                      uint2 group_id [[threadgroup_position_in_grid]],
+                                      uint sgid [[simdgroup_index_in_threadgroup]],
+                                      uint lid [[thread_index_in_threadgroup]]) {
+
+                    threadgroup half tA[2][64][36];  // double buffer A
+                    threadgroup half tB[2][32][68];  // double buffer B
+
+                    uint grow = group_id.y << 6u;
+                    uint gcol = group_id.x << 6u;
+                    uint sg_row = (sgid >> 2u) << 4u;
+                    uint sg_col = (sgid & 3u) << 4u;
+
+                    simdgroup_half8x8 acc[2][2];
+                    for (uint i = 0; i < 2u; i++)
+                        for (uint j = 0; j < 2u; j++)
+                            acc[i][j] = make_filled_simdgroup_matrix<half, 8>(half(0));
+
+                    device const half4 *A4 = (device const half4 *)A;
+                    device const half4 *B4 = (device const half4 *)B;
+                    uint a4s = p.K >> 2u;
+                    uint b4s = p.N >> 2u;
+
+                    // Prefetch first tile into buf 0
+                    {
+                        uint r = lid >> 3u;
+                        uint c4 = lid & 7u;
+                        half4 v = A4[(grow + r) * a4s + c4];
+                        uint bc = c4 << 2u;
+                        tA[0][r][bc] = v.x; tA[0][r][bc+1] = v.y;
+                        tA[0][r][bc+2] = v.z; tA[0][r][bc+3] = v.w;
+                    }
+                    {
+                        uint r = lid >> 4u;
+                        uint c4 = lid & 15u;
+                        half4 v = B4[r * b4s + (gcol >> 2u) + c4];
+                        uint bc = c4 << 2u;
+                        tB[0][r][bc] = v.x; tB[0][r][bc+1] = v.y;
+                        tB[0][r][bc+2] = v.z; tB[0][r][bc+3] = v.w;
+                    }
+                    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+                    uint num_k = p.K >> 5u;  // K/32
+                    for (uint bk = 0; bk < num_k; bk++) {
+                        uint cur = bk & 1u;
+                        uint nxt = 1u - cur;
+                        uint t_next = (bk + 1u) << 5u;
+
+                        // INTERLEAVED: start loading next tile while computing current
+                        // Load next A into nxt buffer (if not last)
+                        if (bk + 1u < num_k) {
+                            uint r = lid >> 3u;
+                            uint c4 = lid & 7u;
+                            half4 v = A4[(grow + r) * a4s + (t_next >> 2u) + c4];
+                            uint bc = c4 << 2u;
+                            tA[nxt][r][bc] = v.x; tA[nxt][r][bc+1] = v.y;
+                            tA[nxt][r][bc+2] = v.z; tA[nxt][r][bc+3] = v.w;
+                        }
+
+                        // Compute current tile — interleaved with load above
+                        simdgroup_half8x8 at0, at1, bt0, bt1;
+                        simdgroup_load(at0, &tA[cur][sg_row][0], 36);
+                        simdgroup_load(bt0, &tB[cur][0][sg_col], 68);
+                        simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                        simdgroup_load(bt1, &tB[cur][0][sg_col+8u], 68);
+                        simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                        simdgroup_load(at1, &tA[cur][sg_row+8u][0], 36);
+                        simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                        simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                        simdgroup_load(at0, &tA[cur][sg_row][8], 36);
+                        simdgroup_load(bt0, &tB[cur][8][sg_col], 68);
+                        simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                        simdgroup_load(bt1, &tB[cur][8][sg_col+8u], 68);
+                        simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                        simdgroup_load(at1, &tA[cur][sg_row+8u][8], 36);
+                        simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                        simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                        // Load next B (overlapped with remaining MMA)
+                        if (bk + 1u < num_k) {
+                            uint r = lid >> 4u;
+                            uint c4 = lid & 15u;
+                            half4 v = B4[(t_next + r) * b4s + (gcol >> 2u) + c4];
+                            uint bc = c4 << 2u;
+                            tB[nxt][r][bc] = v.x; tB[nxt][r][bc+1] = v.y;
+                            tB[nxt][r][bc+2] = v.z; tB[nxt][r][bc+3] = v.w;
+                        }
+
+                        simdgroup_load(at0, &tA[cur][sg_row][16], 36);
+                        simdgroup_load(bt0, &tB[cur][16][sg_col], 68);
+                        simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                        simdgroup_load(bt1, &tB[cur][16][sg_col+8u], 68);
+                        simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                        simdgroup_load(at1, &tA[cur][sg_row+8u][16], 36);
+                        simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                        simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                        simdgroup_load(at0, &tA[cur][sg_row][24], 36);
+                        simdgroup_load(bt0, &tB[cur][24][sg_col], 68);
+                        simdgroup_multiply_accumulate(acc[0][0], at0, bt0, acc[0][0]);
+                        simdgroup_load(bt1, &tB[cur][24][sg_col+8u], 68);
+                        simdgroup_multiply_accumulate(acc[0][1], at0, bt1, acc[0][1]);
+                        simdgroup_load(at1, &tA[cur][sg_row+8u][24], 36);
+                        simdgroup_multiply_accumulate(acc[1][0], at1, bt0, acc[1][0]);
+                        simdgroup_multiply_accumulate(acc[1][1], at1, bt1, acc[1][1]);
+
+                        threadgroup_barrier(mem_flags::mem_threadgroup);
+                    }
+
+                    for (uint i = 0; i < 2u; i++)
+                        for (uint j = 0; j < 2u; j++)
+                            simdgroup_store(acc[i][j],
+                                C + (grow + sg_row + i*8u) * p.N + (gcol + sg_col + j*8u), p.N);
+                }
+            "#;
+
+            let grid = (dim.div_ceil(64), dim.div_ceil(64), 1);
+            let group = (512, 1, 1);
+            match compile_and_bench(
+                &device,
+                &queue,
+                moon_src,
+                "gemm_moon",
+                &a,
+                &b,
+                &c,
+                pb,
+                dim,
+                grid,
+                group,
+            ) {
+                Ok(gf) => println!("  pipelined MMA + double buf: {:.0} GFLOPS", gf),
+                Err(e) => println!("  moon: FAIL: {e}"),
+            }
+        }
+
+        // ── MOONSHOT #4: dual accumulator streams ──
+        println!("\n  === MOONSHOT: dual accumulator (2 output tiles per sg) ===");
+        {
+            // Each simdgroup computes TWO 16×16 output tiles simultaneously.
+            // BM=64 BN=128, 16 sg each doing 16×32 (2×2 + 2×2 = 8 accumulators).
+            // More work per sg = more ILP, hides MMA latency.
+            let dual_src = r#"
+                #include <metal_stdlib>
+                #include <metal_simdgroup_matrix>
+                using namespace metal;
+                struct P { uint M; uint N; uint K; };
+
+                kernel void gemm_dual(device const half *A [[buffer(0)]],
+                                      device const half *B [[buffer(1)]],
+                                      device half *C       [[buffer(2)]],
+                                      constant P &p        [[buffer(3)]],
+                                      uint2 group_id [[threadgroup_position_in_grid]],
+                                      uint sgid [[simdgroup_index_in_threadgroup]],
+                                      uint lid [[thread_index_in_threadgroup]]) {
+
+                    // BM=64, BN=64, BK=32 but each sg does 2×4 = 16×32 output
+                    // 8 sg needed: (64/16) × (64/32) = 4×2 = 8
+                    // 8 sg × 32 = 256 threads
+                    threadgroup half tA[64][36];
+                    threadgroup half tB[32][68];
+
+                    uint grow = group_id.y << 6u;
+                    uint gcol = group_id.x << 6u;
+                    // 8 sg: 4 rows × 2 cols of 16×32 sub-tiles
+                    uint sg_row = (sgid >> 1u) << 4u;  // 0,16,32,48
+                    uint sg_col = (sgid & 1u) << 5u;   // 0,32
+
+                    // 2×4 accumulators per sg = 8 total (vs 4 in baseline)
+                    simdgroup_half8x8 acc[2][4];
+                    for (uint i = 0; i < 2u; i++)
+                        for (uint j = 0; j < 4u; j++)
+                            acc[i][j] = make_filled_simdgroup_matrix<half, 8>(half(0));
+
+                    device const half4 *A4 = (device const half4 *)A;
+                    device const half4 *B4 = (device const half4 *)B;
+                    uint a4s = p.K >> 2u;
+                    uint b4s = p.N >> 2u;
+
+                    for (uint t = 0; t < p.K; t += 32u) {
+                        // Cooperative load: 256 threads
+                        // A: 64×32 = 2048 halfs / 256 = 8 each → 2 half4 loads
+                        for (uint pass = 0; pass < 2u; pass++) {
+                            uint idx = lid + pass * 256u;
+                            uint r = idx >> 3u;
+                            uint c4 = idx & 7u;
+                            half4 v = A4[(grow + r) * a4s + (t >> 2u) + c4];
+                            uint bc = c4 << 2u;
+                            tA[r][bc] = v.x; tA[r][bc+1] = v.y;
+                            tA[r][bc+2] = v.z; tA[r][bc+3] = v.w;
+                        }
+                        // B: 32×64 = 2048 halfs / 256 = 8 each → 2 half4 loads
+                        for (uint pass = 0; pass < 2u; pass++) {
+                            uint idx = lid + pass * 256u;
+                            uint r = idx >> 4u;
+                            uint c4 = idx & 15u;
+                            half4 v = B4[(t + r) * b4s + (gcol >> 2u) + c4];
+                            uint bc = c4 << 2u;
+                            tB[r][bc] = v.x; tB[r][bc+1] = v.y;
+                            tB[r][bc+2] = v.z; tB[r][bc+3] = v.w;
+                        }
+                        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+                        // MMA: 2×4 accumulators, 4 K-steps
+                        for (uint kk = 0; kk < 32u; kk += 8u) {
+                            simdgroup_half8x8 at[2], bt[4];
+                            for (uint i = 0; i < 2u; i++)
+                                simdgroup_load(at[i], &tA[sg_row + i*8u][kk], 36);
+                            for (uint j = 0; j < 4u; j++)
+                                simdgroup_load(bt[j], &tB[kk][sg_col + j*8u], 68);
+                            for (uint i = 0; i < 2u; i++)
+                                for (uint j = 0; j < 4u; j++)
+                                    simdgroup_multiply_accumulate(acc[i][j], at[i], bt[j], acc[i][j]);
+                        }
+                        threadgroup_barrier(mem_flags::mem_threadgroup);
+                    }
+
+                    for (uint i = 0; i < 2u; i++)
+                        for (uint j = 0; j < 4u; j++)
+                            simdgroup_store(acc[i][j],
+                                C + (grow + sg_row + i*8u) * p.N + (gcol + sg_col + j*8u), p.N);
+                }
+            "#;
+
+            let grid = (dim.div_ceil(64), dim.div_ceil(64), 1);
+            let group = (256, 1, 1);
+            match compile_and_bench(
+                &device,
+                &queue,
+                dual_src,
+                "gemm_dual",
+                &a,
+                &b,
+                &c,
+                pb,
+                dim,
+                grid,
+                group,
+            ) {
+                Ok(gf) => println!("  dual acc (8 sg, 2×4 per sg, 256 thr): {:.0} GFLOPS", gf),
+                Err(e) => println!("  dual: FAIL: {e}"),
+            }
+
+            // Also try 16 sg version with 2×2 → 4 acc (baseline) vs 8 sg 2×4 → 8 acc
+            let group2 = (512, 1, 1);
+            match compile_and_bench(
+                &device,
+                &queue,
+                dual_src,
+                "gemm_dual",
+                &a,
+                &b,
+                &c,
+                pb,
+                dim,
+                grid,
+                group2,
+            ) {
+                Ok(gf) => println!(
+                    "  dual acc (8 sg, 512 thr WRONG): {:.0} GFLOPS (likely broken)",
+                    gf
+                ),
+                Err(_) => {}
+            }
+        }
+
+        // ── MOONSHOT #10: 4096×4096 to see if bigger = better ──
+        println!("\n  === MOONSHOT: large matrix (4096×4096) ===");
+        {
+            let dim4 = 4096usize;
+            let a4 = device.new_buffer(dim4 * dim4 * 2)?;
+            let b4 = device.new_buffer(dim4 * dim4 * 2)?;
+            let c4 = device.new_buffer(dim4 * dim4 * 2)?;
+            a4.with_data_mut(|d| {
+                let s = unsafe {
+                    std::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u16, dim4 * dim4)
+                };
+                for v in s.iter_mut() {
+                    *v = metal::f32_to_fp16(0.001);
+                }
+            });
+            b4.with_data_mut(|d| {
+                let s = unsafe {
+                    std::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u16, dim4 * dim4)
+                };
+                for v in s.iter_mut() {
+                    *v = metal::f32_to_fp16(0.001);
+                }
+            });
+            #[repr(C)]
+            struct P4 {
+                m: u32,
+                n: u32,
+                k: u32,
+            }
+            let p4 = P4 {
+                m: dim4 as u32,
+                n: dim4 as u32,
+                k: dim4 as u32,
+            };
+            let pb4 = unsafe {
+                std::slice::from_raw_parts(&p4 as *const P4 as *const u8, std::mem::size_of::<P4>())
+            };
+
+            let grid4 = (dim4.div_ceil(64), dim4.div_ceil(64), 1);
+            let group = (512, 1, 1);
+            match compile_and_bench(
+                &device, &queue, opt_src, "gemm_opt", &a4, &b4, &c4, pb4, dim4, grid4, group,
+            ) {
+                Ok(gf) => println!("  4096×4096 bitshift: {:.0} GFLOPS", gf),
+                Err(e) => println!("  4096: FAIL: {e}"),
+            }
+
+            // 8192×8192
+            let dim8 = 8192usize;
+            let a8 = device.new_buffer(dim8 * dim8 * 2)?;
+            let b8 = device.new_buffer(dim8 * dim8 * 2)?;
+            let c8 = device.new_buffer(dim8 * dim8 * 2)?;
+            a8.with_data_mut(|d| {
+                let s = unsafe {
+                    std::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u16, dim8 * dim8)
+                };
+                for v in s.iter_mut() {
+                    *v = metal::f32_to_fp16(0.0001);
+                }
+            });
+            b8.with_data_mut(|d| {
+                let s = unsafe {
+                    std::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u16, dim8 * dim8)
+                };
+                for v in s.iter_mut() {
+                    *v = metal::f32_to_fp16(0.0001);
+                }
+            });
+            let p8 = P4 {
+                m: dim8 as u32,
+                n: dim8 as u32,
+                k: dim8 as u32,
+            };
+            let pb8 = unsafe {
+                std::slice::from_raw_parts(&p8 as *const P4 as *const u8, std::mem::size_of::<P4>())
+            };
+            let grid8 = (dim8.div_ceil(64), dim8.div_ceil(64), 1);
+            match compile_and_bench(
+                &device, &queue, opt_src, "gemm_opt", &a8, &b8, &c8, pb8, dim8, grid8, group,
+            ) {
+                Ok(gf) => println!("  8192×8192 bitshift: {:.0} GFLOPS", gf),
+                Err(e) => println!("  8192: FAIL: {e}"),
+            }
+        }
+
         // ── Persistent kernel: 16 threadgroups loop over tiles ──
         println!("\n  === Persistent kernel (16 TG, loop over tiles) ===");
         {
