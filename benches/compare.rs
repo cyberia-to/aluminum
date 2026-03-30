@@ -3,8 +3,8 @@
 //! Measures: device discovery, buffer creation, shader compilation,
 //! dispatch overhead, batch encoding, pipelining, inference sim, SAXPY throughput.
 
-mod aluminium_bench;
-mod objc2_bench;
+mod aluminium;
+mod objc2;
 
 fn us(secs: f64) -> f64 {
     secs * 1_000_000.0
@@ -33,8 +33,8 @@ fn main() {
 
     // 1. Device discovery
     let iters = 1000;
-    let r = aluminium_bench::device_discovery(iters);
-    let o = objc2_bench::device_discovery(iters);
+    let r = aluminium::device_discovery(iters);
+    let o = objc2::device_discovery(iters);
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Device discovery",
@@ -45,8 +45,8 @@ fn main() {
 
     // 2. Buffer creation (4 KB)
     let iters = 5000;
-    let r = aluminium_bench::buffer_creation(iters, 4096);
-    let o = objc2_bench::buffer_creation(iters, 4096);
+    let r = aluminium::buffer_creation(iters, 4096);
+    let o = objc2::buffer_creation(iters, 4096);
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Buffer create (4 KB)",
@@ -57,8 +57,8 @@ fn main() {
 
     // 3. Buffer creation (16 MB)
     let iters = 500;
-    let r = aluminium_bench::buffer_creation(iters, 16 * 1024 * 1024);
-    let o = objc2_bench::buffer_creation(iters, 16 * 1024 * 1024);
+    let r = aluminium::buffer_creation(iters, 16 * 1024 * 1024);
+    let o = objc2::buffer_creation(iters, 16 * 1024 * 1024);
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Buffer create (16 MB)",
@@ -69,8 +69,8 @@ fn main() {
 
     // 4. Shader compilation
     let iters = 100;
-    let r = aluminium_bench::shader_compile(iters);
-    let o = objc2_bench::shader_compile(iters);
+    let r = aluminium::shader_compile(iters);
+    let o = objc2::shader_compile(iters);
     println!(
         "{:<30} {:>10.2} ms {:>10.2} ms {:>9.2}x",
         "Shader compile (SAXPY)",
@@ -81,8 +81,8 @@ fn main() {
 
     // 4b. Encode overhead (CPU only, no per-iter GPU wait) — min of 3
     let iters = 5000;
-    let r = min_of(3, || aluminium_bench::encode_overhead(iters));
-    let o = min_of(3, || objc2_bench::encode_overhead(iters));
+    let r = min_of(3, || aluminium::encode_overhead(iters));
+    let o = min_of(3, || objc2::encode_overhead(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Encode (wrapper)",
@@ -90,7 +90,7 @@ fn main() {
         us(o),
         o / r
     );
-    let ru = min_of(3, || aluminium_bench::encode_unchecked(iters));
+    let ru = min_of(3, || aluminium::encode_unchecked(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Encode (unchecked)",
@@ -101,9 +101,9 @@ fn main() {
 
     // 4c. Batch encode — fair comparison: both sides batch 100 dispatches per cmd
     let batch_iters = 200;
-    let re = min_of(3, || aluminium_bench::encode_encoder(100, batch_iters));
-    let rb = min_of(3, || aluminium_bench::batch_encode(100, batch_iters));
-    let ob = min_of(3, || objc2_bench::batch_encode(100, batch_iters));
+    let re = min_of(3, || aluminium::encode_encoder(100, batch_iters));
+    let rb = min_of(3, || aluminium::batch_encode(100, batch_iters));
+    let ob = min_of(3, || objc2::batch_encode(100, batch_iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Batch/op (encoder)",
@@ -121,8 +121,8 @@ fn main() {
 
     // 5. Dispatch overhead (tiny kernel, sync) — min of 3 runs for stability
     let iters = 1000;
-    let r = min_of(3, || aluminium_bench::dispatch_overhead(iters));
-    let o = min_of(3, || objc2_bench::dispatch_overhead(iters));
+    let r = min_of(3, || aluminium::dispatch_overhead(iters));
+    let o = min_of(3, || objc2::dispatch_overhead(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Dispatch (wrapper)",
@@ -131,7 +131,7 @@ fn main() {
         o / r
     );
 
-    let raw = min_of(3, || aluminium_bench::dispatch_raw(iters));
+    let raw = min_of(3, || aluminium::dispatch_raw(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Dispatch (raw msgSend)",
@@ -140,7 +140,7 @@ fn main() {
         o / raw
     );
 
-    let imp = min_of(3, || aluminium_bench::dispatch_imp(iters));
+    let imp = min_of(3, || aluminium::dispatch_imp(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Dispatch (IMP+autorelease)",
@@ -149,7 +149,7 @@ fn main() {
         o / imp
     );
 
-    let unc = min_of(3, || aluminium_bench::dispatch_unchecked(iters));
+    let unc = min_of(3, || aluminium::dispatch_unchecked(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Dispatch (unchecked)",
@@ -158,7 +158,7 @@ fn main() {
         o / unc
     );
 
-    let ar = min_of(3, || aluminium_bench::dispatch_autoreleased(iters));
+    let ar = min_of(3, || aluminium::dispatch_autoreleased(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Dispatch (autoreleased)",
@@ -168,7 +168,7 @@ fn main() {
     );
 
     // 5f. Pipelined: overlap GPU wait with next encode
-    let piped = min_of(3, || aluminium_bench::dispatch_pipelined(iters));
+    let piped = min_of(3, || aluminium::dispatch_pipelined(iters));
     println!(
         "{:<30} {:>10.2} us {:>10.2} us {:>9.2}x",
         "Dispatch (pipelined)",
@@ -178,8 +178,8 @@ fn main() {
     );
 
     // 5g. Inference simulation: 3 kernels × 100 layers, batched
-    let inf_r = min_of(3, || aluminium_bench::inference_sim(100, 100));
-    let inf_o = min_of(3, || objc2_bench::inference_sim(100, 100));
+    let inf_r = min_of(3, || aluminium::inference_sim(100, 100));
+    let inf_o = min_of(3, || objc2::inference_sim(100, 100));
     println!(
         "{:<30} {:>10.2} ms {:>10.2} ms {:>9.2}x",
         "Inference (3x100 layers)",
@@ -191,8 +191,8 @@ fn main() {
     // 6. Large compute (SAXPY 16M floats)
     let n = 16 * 1024 * 1024;
     let iters = 100;
-    let r = aluminium_bench::large_compute(iters, n);
-    let o = objc2_bench::large_compute(iters, n);
+    let r = aluminium::large_compute(iters, n);
+    let o = objc2::large_compute(iters, n);
     let bw_r = (n as f64 * 4.0 * 3.0) / r / 1e9;
     let bw_o = (n as f64 * 4.0 * 3.0) / o / 1e9;
     println!(
@@ -208,7 +208,7 @@ fn main() {
     );
 
     // 6b. SAXPY with ComputeDispatcher
-    let ri = aluminium_bench::large_compute_imp(iters, n);
+    let ri = aluminium::large_compute_imp(iters, n);
     let bw_ri = (n as f64 * 4.0 * 3.0) / ri / 1e9;
     println!(
         "{:<30} {:>10.2} ms {:>10.2} ms {:>9.2}x",
