@@ -54,6 +54,7 @@ pub mod device;
 pub mod dispatch;
 pub mod encoder;
 pub mod ffi;
+pub mod fp16;
 pub mod pipeline;
 pub mod shader;
 pub mod sync;
@@ -69,7 +70,7 @@ pub use shader::{MtlFunction, MtlLibrary};
 pub use sync::{MtlEvent, MtlFence, MtlSharedEvent};
 pub use texture::MtlTexture;
 
-pub use buffer::{cvt_f16_f32, cvt_f32_f16, f32_to_fp16, fp16_to_f32};
+pub use fp16::{cvt_f16_f32, cvt_f32_f16, f32_to_fp16, fp16_to_f32};
 
 /// Execute a closure inside an autorelease pool.
 /// Use this to scope autoreleased ObjC objects (e.g. from `command_buffer_unretained`).

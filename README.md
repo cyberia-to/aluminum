@@ -97,7 +97,7 @@ aluminium::fp16_to_f32(u16) -> f32
 ```
 cargo build --release
 cargo run --example vecadd
-cargo run --release -p metal-tools --bin bench
+cargo run --release -p metal-benches --bin bench
 ```
 
 requires macOS with Metal-capable GPU.

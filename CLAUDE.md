@@ -51,16 +51,21 @@ cargo workspace with two members:
 
 - `aluminium` (root crate) — library + metal_probe binary + examples.
   zero external dependencies. links only system frameworks via FFI.
-- `tools/` (crate `metal-tools`) — CLI binaries (bench).
+- `benches/` (crate `metal-benches`) — CLI binaries (bench, compare).
   heavy dependencies isolated here.
 
 ```
 src/                  core library (zero deps)
   lib.rs              public API: MtlDevice, MtlBuffer, MetalError
-  ffi.rs              Metal.framework, CoreFoundation, libobjc FFI
+  ffi/                Metal.framework, CoreFoundation, libobjc FFI
+    mod.rs            types, constants, extern links, string helpers
+    selectors.rs      cached ObjC selectors and classes
+    trampoline.rs     typed objc_msgSend trampolines
   device.rs           MtlDevice: discovery, properties, factory methods
-  buffer.rs           MtlBuffer: zero-copy shared GPU memory, fp16 conversion
+  buffer.rs           MtlBuffer: zero-copy shared GPU memory
+  fp16.rs             fp16<->f32 conversion (NEON + software fallback)
   command.rs          MtlCommandQueue, MtlCommandBuffer
+  dispatch.rs         ComputeDispatcher, BatchEncoder, GpuFuture
   encoder.rs          MtlComputeEncoder, MtlBlitEncoder
   shader.rs           MtlLibrary, MtlFunction: MSL compilation
   pipeline.rs         MtlComputePipeline, MtlRenderPipeline
@@ -68,7 +73,8 @@ src/                  core library (zero deps)
   texture.rs          MtlTexture
   probe/              metal_probe — 5-level capability probe
 examples/             runnable demos (vecadd, matmul)
-tools/                separate crate with heavy deps (bench)
+benches/              separate crate with heavy deps (bench, compare)
+docs/                 documentation (tutorial, guide, explanations)
 specs/                specification (source of truth)
   api.md              API spec — concepts, lifecycle, apple mapping
 ```

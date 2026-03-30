@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "tools"]
+members = [".", "benches"]
 resolver = "2"
 
 [workspace.package]
