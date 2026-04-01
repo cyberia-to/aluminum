@@ -30,6 +30,9 @@ pub use shader::{Shader, ShaderLib};
 pub use sync::{Event, Fence, SharedEvent};
 pub use texture::Texture;
 
+// Memory foundation — re-export for single-import convenience
+pub use unimem::{Block, Layout, MemError, Tape};
+
 // Re-export fp16 from acpu (single source of truth for numeric conversions)
 pub use acpu::numeric::fp16::{f32_to_fp16, fp16_to_f32};
 pub use acpu::{cast_f16_f32, cast_f32_f16};

@@ -20,6 +20,7 @@ categories = ["os::macos-apis", "graphics", "hardware-support"]
 readme = "README.md"
 
 [dependencies]
+unimem = { path = "../unimem" }
 acpu = { path = "../acpu" }
 
 [lib]

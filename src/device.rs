@@ -166,6 +166,14 @@ impl Gpu {
         Ok(Buffer::from_raw(raw, size))
     }
 
+    /// Wrap a unimem::Block as a Metal buffer — zero copy.
+    ///
+    /// The MTLBuffer shares the Block's physical memory (IOSurface-backed).
+    /// Block must outlive the returned Buffer.
+    pub fn wrap(&self, block: &unimem::Block) -> Result<Buffer, GpuError> {
+        unsafe { self.buffer_wrap(block.address() as *mut std::ffi::c_void, block.size()) }
+    }
+
     /// Create a shared-mode buffer initialized with data.
     pub fn buffer_with_data(&self, data: &[u8]) -> Result<Buffer, GpuError> {
         let raw = unsafe {
