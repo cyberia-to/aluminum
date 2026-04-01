@@ -63,6 +63,10 @@ cached_sel!(
     c"newBufferWithBytes:length:options:"
 );
 cached_sel!(
+    SEL_newBufferWithBytesNoCopy_length_options_deallocator,
+    c"newBufferWithBytesNoCopy:length:options:deallocator:"
+);
+cached_sel!(
     SEL_newLibraryWithSource_options_error,
     c"newLibraryWithSource:options:error:"
 );

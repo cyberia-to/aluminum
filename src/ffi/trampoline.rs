@@ -99,6 +99,14 @@ pub unsafe fn msg3<A, B, C>(target: ObjcId, sel: ObjcSel, a: A, b: B, c: C) -> O
     f(target, sel, a, b, c)
 }
 
+/// Send a message with 4 args.
+#[inline(always)]
+pub unsafe fn msg4<A, B, C, D>(target: ObjcId, sel: ObjcSel, a: A, b: B, c: C, d: D) -> ObjcId {
+    type F<A, B, C, D> = unsafe extern "C" fn(ObjcId, ObjcSel, A, B, C, D) -> ObjcId;
+    let f: F<A, B, C, D> = std::mem::transmute(objc_msgSend as *const c_void);
+    f(target, sel, a, b, c, d)
+}
+
 // ── Void msg_send helpers (encoder hot path) ──
 
 /// Send a message with 1 ObjcId arg, returning nothing.

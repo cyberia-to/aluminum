@@ -16,12 +16,17 @@ pub struct MtlDevice {
 
 impl MtlDevice {
     /// Get the system default Metal device.
+    ///
+    /// Falls back to first device from MTLCopyAllDevices if
+    /// MTLCreateSystemDefaultDevice returns nil (headless/no display session).
     pub fn system_default() -> Result<Self, MetalError> {
         let raw = unsafe { MTLCreateSystemDefaultDevice() };
-        if raw.is_null() {
-            return Err(MetalError::DeviceNotFound);
+        if !raw.is_null() {
+            return Ok(MtlDevice { raw });
         }
-        Ok(MtlDevice { raw })
+        // Fallback: MTLCopyAllDevices works even without active display session
+        let devices = Self::all()?;
+        devices.into_iter().next().ok_or(MetalError::DeviceNotFound)
     }
 
     /// Get all available Metal devices.
@@ -120,6 +125,43 @@ impl MtlDevice {
             return Err(MetalError::BufferCreationFailed(format!("{} bytes", size)));
         }
         Ok(MtlBuffer::from_raw_private(raw, size))
+    }
+
+    /// Wrap an existing pointer as a Metal buffer — zero copy.
+    ///
+    /// The pointer must be page-aligned and the memory must stay alive
+    /// for the lifetime of the returned buffer. Metal reads/writes
+    /// directly to the provided memory — no allocation, no copy.
+    ///
+    /// # Safety
+    /// - `ptr` must be page-aligned (4096 or 16384 on Apple Silicon)
+    /// - `size` must be page-aligned
+    /// - Memory at `ptr..ptr+size` must remain valid while the buffer exists
+    /// - Caller must not free the memory while GPU commands are in flight
+    pub unsafe fn new_buffer_no_copy(
+        &self,
+        ptr: *mut std::ffi::c_void,
+        size: usize,
+    ) -> Result<MtlBuffer, MetalError> {
+        if ptr.is_null() || size == 0 {
+            return Err(MetalError::BufferCreationFailed("null ptr or zero size".into()));
+        }
+        // deallocator = nil — we manage the memory ourselves
+        let raw = msg4::<*mut c_void, NSUInteger, NSUInteger, *const c_void>(
+            self.raw,
+            SEL_newBufferWithBytesNoCopy_length_options_deallocator(),
+            ptr,
+            size,
+            MTLResourceStorageModeShared,
+            std::ptr::null(), // nil deallocator block
+        );
+        if raw.is_null() {
+            return Err(MetalError::BufferCreationFailed(format!(
+                "newBufferWithBytesNoCopy failed: ptr={:?} size={}",
+                ptr, size
+            )));
+        }
+        Ok(MtlBuffer::from_raw(raw, size))
     }
 
     /// Create a shared-mode buffer initialized with data.

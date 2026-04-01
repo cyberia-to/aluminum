@@ -19,6 +19,9 @@ keywords = ["metal", "gpu", "apple", "compute", "macos"]
 categories = ["os::macos-apis", "graphics", "hardware-support"]
 readme = "README.md"
 
+[dependencies]
+acpu = { path = "../acpu" }
+
 [lib]
 name = "aruminium"
 path = "src/lib.rs"

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod fp16_tests {
-    use crate::fp16::*;
+    use crate::{fp16_to_f32, f32_to_fp16, cvt_f16_f32, cvt_f32_f16};
 
     #[test]
     fn zero_round_trip() {

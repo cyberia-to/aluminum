@@ -45,6 +45,34 @@ pure Rust driver for Apple Metal GPU. compile shaders, create pipelines,
 dispatch compute and render work on GPU hardware. zero external
 dependencies in the core crate — only macOS system frameworks.
 
+## role in the stack
+
+aruminium is a hardware GPU driver. it compiles shaders and dispatches GPU work.
+it does NOT allocate shared memory, run CPU math, build graphs, or schedule ops.
+
+```
+cyb-mem      memory: IOSurface, arena, pool
+acpu         driver: CPU/AMX compute (NEON, AMX inline asm)
+aruminium    driver: Metal GPU compute (shaders, pipelines)  ← this crate
+rane         driver: ANE hardware (MIL compile, dispatch)
+  ↑ drivers — raw hardware access, no model knowledge
+──────────────────────────────────────────────────────
+  ↓ runtimes — model graphs, scheduling, inference logic
+cyb/llm      runtime: graph IR, jets, scheduling, model loading
+```
+
+all inference logic (attention blocks, transformer layers, model loading,
+op scheduling, graph optimization) belongs in the runtime layer
+(https://github.com/cyberia-to/cyb), not in the drivers.
+
+drivers expose raw capabilities. runtimes compose them.
+
+## sibling drivers
+
+- cyb-mem (https://github.com/cyberia-to/unimem) — memory: IOSurface, arena, zero-copy buffers
+- acpu (https://github.com/cyberia-to/acpu) — CPU/AMX: sgemm, softmax, rmsnorm, rope, silu
+- rane (https://github.com/cyberia-to/rane) — ANE: MIL compile, load, run
+
 ## architecture
 
 cargo workspace with two members:
