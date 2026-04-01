@@ -54,6 +54,21 @@ SAXPY:           143 vs 140 GB/s
 
 same GPU, same work. aruminium is lighter.
 
+## zero-copy memory
+
+GPU buffers can wrap `unimem::Block` — IOSurface-backed pinned memory shared with CPU (acpu) and ANE (rane):
+
+```rust,ignore
+use aruminium::{Gpu, Block};
+
+let block = Block::open(n * 4)?;
+let gpu = Gpu::open()?;
+let buf = gpu.wrap(&block)?;  // MTLBuffer over same physical pages
+// GPU reads/writes block's memory directly — zero copies
+```
+
+one allocation. three devices. no copies.
+
 ## api
 
 ```rust,ignore

@@ -1,6 +1,6 @@
 //! Integration tests — full GPU pipeline: compile → dispatch → verify
 
-use aruminium::{autorelease_pool, Batch, Commands, Dispatch, Gpu, GpuError};
+use aruminium::{autorelease_pool, Batch, Block, Commands, Dispatch, Gpu, GpuError};
 use std::ffi::c_void;
 
 #[test]
@@ -954,5 +954,69 @@ fn batch_launch_groups() -> Result<(), GpuError> {
             );
         }
     });
+    Ok(())
+}
+
+#[test]
+fn wrap_block_vecadd() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
+    let queue = device.new_command_queue()?;
+
+    let source = r#"
+        #include <metal_stdlib>
+        using namespace metal;
+        kernel void vecadd(device float *a [[buffer(0)]],
+                           device float *b [[buffer(1)]],
+                           device float *c [[buffer(2)]],
+                           uint id [[thread_position_in_grid]]) {
+            c[id] = a[id] + b[id];
+        }
+    "#;
+
+    let lib = device.compile(source)?;
+    let func = lib.function("vecadd")?;
+    let pipe = device.pipeline(&func)?;
+
+    let n = 256;
+
+    // Allocate via unimem::Block — shared with CPU/ANE
+    let block_a = Block::open(n * 4).unwrap();
+    let block_b = Block::open(n * 4).unwrap();
+    let block_c = Block::open(n * 4).unwrap();
+
+    for (i, v) in block_a.as_f32_mut().iter_mut().enumerate() {
+        *v = i as f32;
+    }
+    for v in block_b.as_f32_mut().iter_mut() {
+        *v = 10.0;
+    }
+
+    // Wrap blocks as Metal buffers — zero copy
+    let buf_a = device.wrap(&block_a)?;
+    let buf_b = device.wrap(&block_b)?;
+    let buf_c = device.wrap(&block_c)?;
+
+    let cmd = queue.commands()?;
+    let enc = cmd.encoder()?;
+    enc.bind(&pipe);
+    enc.bind_buffer(&buf_a, 0, 0);
+    enc.bind_buffer(&buf_b, 0, 1);
+    enc.bind_buffer(&buf_c, 0, 2);
+    enc.launch((n, 1, 1), (256, 1, 1));
+    enc.finish();
+    cmd.submit();
+    cmd.wait();
+
+    // Read result from Block directly — same physical memory
+    for i in 0..n {
+        let expected = i as f32 + 10.0;
+        let actual = block_c.as_f32()[i];
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "wrap_block: c[{}]={}, expected {}",
+            i, actual, expected
+        );
+    }
+
     Ok(())
 }
