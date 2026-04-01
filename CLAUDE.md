@@ -84,21 +84,21 @@ cargo workspace with two members:
 
 ```
 src/                  core library (zero deps)
-  lib.rs              public API: MtlDevice, MtlBuffer, MetalError
+  lib.rs              public API: Gpu, Buffer, GpuError
   ffi/                Metal.framework, CoreFoundation, libobjc FFI
     mod.rs            types, constants, extern links, string helpers
     selectors.rs      cached ObjC selectors and classes
     trampoline.rs     typed objc_msgSend trampolines
-  device.rs           MtlDevice: discovery, properties, factory methods
-  buffer.rs           MtlBuffer: zero-copy shared GPU memory
+  device.rs           Gpu: discovery, properties, factory methods
+  buffer.rs           Buffer: zero-copy shared GPU memory
   fp16.rs             fp16<->f32 conversion (NEON + software fallback)
-  command.rs          MtlCommandQueue, MtlCommandBuffer
-  dispatch.rs         ComputeDispatcher, BatchEncoder, GpuFuture
-  encoder.rs          MtlComputeEncoder, MtlBlitEncoder
-  shader.rs           MtlLibrary, MtlFunction: MSL compilation
-  pipeline.rs         MtlComputePipeline, MtlRenderPipeline
-  sync.rs             MtlFence, MtlEvent, MtlSharedEvent
-  texture.rs          MtlTexture
+  command.rs          Queue, Commands
+  dispatch.rs         Dispatch, Batch, GpuFuture
+  encoder.rs          Encoder, Copier
+  shader.rs           ShaderLib, Shader: MSL compilation
+  pipeline.rs         Pipeline
+  sync.rs             Fence, Event, SharedEvent
+  texture.rs          Texture
   probe.rs            metal_probe binary — 5-level capability probe
 examples/             runnable demos (vecadd, matmul)
 benches/              separate crate with heavy deps (bench, compare)

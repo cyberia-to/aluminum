@@ -24,10 +24,10 @@ aruminium = { path = "../aruminium" }  # or git URL
 ## step 2: discover the GPU
 
 ```rust
-use aruminium::{MtlDevice, MetalError};
+use aruminium::{Gpu, GpuError};
 
-fn main() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn main() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     println!("GPU: {}", device.name());
     println!("Unified memory: {}", device.has_unified_memory());
     println!("Max buffer: {} MB", device.max_buffer_length() / (1024 * 1024));
@@ -48,9 +48,9 @@ create three buffers for vector addition: A + B = C.
 
 ```rust
 let n = 1024usize;
-let buf_a = device.new_buffer(n * 4)?;  // 1024 floats = 4096 bytes
-let buf_b = device.new_buffer(n * 4)?;
-let buf_c = device.new_buffer(n * 4)?;
+let buf_a = device.buffer(n * 4)?;  // 1024 floats = 4096 bytes
+let buf_b = device.buffer(n * 4)?;
+let buf_c = device.buffer(n * 4)?;
 ```
 
 these are shared-mode buffers: CPU and GPU see the same memory.
@@ -58,12 +58,12 @@ these are shared-mode buffers: CPU and GPU see the same memory.
 write data from CPU:
 
 ```rust
-buf_a.with_f32_mut(|data| {
+buf_a.write_f32(|data| {
     for i in 0..n {
         data[i] = i as f32;
     }
 });
-buf_b.with_f32_mut(|data| {
+buf_b.write_f32(|data| {
     for i in 0..n {
         data[i] = (n - i) as f32;
     }
@@ -91,9 +91,9 @@ let source = r#"
 ## step 5: compile and create pipeline
 
 ```rust
-let lib = device.new_library_with_source(source)?;
-let func = lib.get_function("vecadd")?;
-let pipeline = device.new_compute_pipeline(&func)?;
+let lib = device.compile(source)?;
+let func = lib.function("vecadd")?;
+let pipeline = device.pipeline(&func)?;
 ```
 
 this compiles MSL to GPU bytecode at runtime. the pipeline is
@@ -103,27 +103,27 @@ a reusable compiled state — create once, dispatch many times.
 
 ```rust
 let queue = device.new_command_queue()?;
-let cmd = queue.command_buffer()?;
-let enc = cmd.compute_encoder()?;
+let cmd = queue.commands()?;
+let enc = cmd.encoder()?;
 
-enc.set_pipeline(&pipeline);
-enc.set_buffer(&buf_a, 0, 0);  // buffer, offset, index
-enc.set_buffer(&buf_b, 0, 1);
-enc.set_buffer(&buf_c, 0, 2);
-enc.dispatch_threads(
+enc.bind(&pipeline);
+enc.bind_buffer(&buf_a, 0, 0);  // buffer, offset, index
+enc.bind_buffer(&buf_b, 0, 1);
+enc.bind_buffer(&buf_c, 0, 2);
+enc.launch(
     (n, 1, 1),   // grid: 1024 threads total
     (64, 1, 1),  // threadgroup: 64 threads per group
 );
-enc.end_encoding();
+enc.finish();
 
-cmd.commit();
-cmd.wait_until_completed();
+cmd.submit();
+cmd.wait();
 ```
 
 ## step 7: read results
 
 ```rust
-buf_c.with_f32(|data| {
+buf_c.read_f32(|data| {
     for i in 0..n {
         let expected = n as f32;  // i + (n - i) = n
         assert!((data[i] - expected).abs() < 1e-6);
@@ -135,14 +135,14 @@ buf_c.with_f32(|data| {
 ## step 8: add GPU timing
 
 ```rust
-cmd.commit();
-cmd.wait_until_completed();
+cmd.submit();
+cmd.wait();
 println!("GPU time: {:.3} ms", cmd.gpu_time() * 1000.0);
 ```
 
-## step 9: pass parameters via set_bytes
+## step 9: pass parameters via push
 
-for small constants (uniforms), use `set_bytes` instead of a buffer:
+for small constants (uniforms), use `push` instead of a buffer:
 
 ```rust
 #[repr(C)]
@@ -155,7 +155,7 @@ let bytes = unsafe {
         std::mem::size_of::<Params>(),
     )
 };
-enc.set_bytes(bytes, 3);  // bind at index 3
+enc.push(bytes, 3);  // bind at index 3
 ```
 
 in the shader:
@@ -170,10 +170,10 @@ kernel void my_kernel(constant Params &p [[buffer(3)]],
 ## complete example
 
 ```rust
-use aruminium::{MtlDevice, MetalError};
+use aruminium::{Gpu, GpuError};
 
-fn main() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn main() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let source = r#"
@@ -187,34 +187,34 @@ fn main() -> Result<(), MetalError> {
         }
     "#;
 
-    let lib = device.new_library_with_source(source)?;
-    let func = lib.get_function("vecadd")?;
-    let pipeline = device.new_compute_pipeline(&func)?;
+    let lib = device.compile(source)?;
+    let func = lib.function("vecadd")?;
+    let pipeline = device.pipeline(&func)?;
 
     let n = 1024usize;
-    let buf_a = device.new_buffer(n * 4)?;
-    let buf_b = device.new_buffer(n * 4)?;
-    let buf_c = device.new_buffer(n * 4)?;
+    let buf_a = device.buffer(n * 4)?;
+    let buf_b = device.buffer(n * 4)?;
+    let buf_c = device.buffer(n * 4)?;
 
-    buf_a.with_f32_mut(|d| {
+    buf_a.write_f32(|d| {
         for i in 0..n { d[i] = i as f32; }
     });
-    buf_b.with_f32_mut(|d| {
+    buf_b.write_f32(|d| {
         for i in 0..n { d[i] = (n - i) as f32; }
     });
 
-    let cmd = queue.command_buffer()?;
-    let enc = cmd.compute_encoder()?;
-    enc.set_pipeline(&pipeline);
-    enc.set_buffer(&buf_a, 0, 0);
-    enc.set_buffer(&buf_b, 0, 1);
-    enc.set_buffer(&buf_c, 0, 2);
-    enc.dispatch_threads((n, 1, 1), (64, 1, 1));
-    enc.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let enc = cmd.encoder()?;
+    enc.bind(&pipeline);
+    enc.bind_buffer(&buf_a, 0, 0);
+    enc.bind_buffer(&buf_b, 0, 1);
+    enc.bind_buffer(&buf_c, 0, 2);
+    enc.launch((n, 1, 1), (64, 1, 1));
+    enc.finish();
+    cmd.submit();
+    cmd.wait();
 
-    buf_c.with_f32(|d| {
+    buf_c.read_f32(|d| {
         let ok = d.iter().enumerate().all(|(i, &v)| {
             (v - n as f32).abs() < 1e-6
         });
@@ -231,5 +231,5 @@ fn main() -> Result<(), MetalError> {
 ## next steps
 
 - see `examples/matmul.rs` for 2D dispatch with struct parameters
-- see `docs/guide.md` for ComputeDispatcher, batch encoding, pipelining
+- see `docs/guide.md` for Dispatch, batch encoding, pipelining
 - see `docs/explanations.md` for why the architecture works this way

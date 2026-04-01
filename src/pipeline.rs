@@ -1,15 +1,15 @@
-//! MtlComputePipeline + MtlRenderPipeline
+//! Pipeline + MtlRenderPipeline
 
 use crate::ffi::*;
 
 /// A compiled compute pipeline state. Wraps `id<MTLComputePipelineState>`.
-pub struct MtlComputePipeline {
+pub struct Pipeline {
     raw: ObjcId,
 }
 
-impl MtlComputePipeline {
+impl Pipeline {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlComputePipeline { raw }
+        Pipeline { raw }
     }
 
     /// Maximum total threads per threadgroup for this pipeline.
@@ -32,7 +32,7 @@ impl MtlComputePipeline {
     }
 }
 
-impl Drop for MtlComputePipeline {
+impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }

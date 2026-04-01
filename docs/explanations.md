@@ -57,9 +57,9 @@ examples, probe, and general-purpose code.
 `objc_retainAutoreleasedReturnValue` called immediately after
 `objc_msgSend`. the ObjC runtime recognizes this pattern and skips
 the autorelease+retain round-trip. saves ~100ns per command buffer
-creation. used by default `command_buffer()` and `compute_encoder()`.
+creation. used by default `commands()` and `encoder()`.
 
-### tier 3: pre-resolved IMP (ComputeDispatcher)
+### tier 3: pre-resolved IMP (Dispatch)
 
 `class_getMethodImplementation` resolves a selector to a direct
 function pointer (IMP) at construction time. subsequent calls bypass

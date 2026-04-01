@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod fp16_tests {
-    use crate::{fp16_to_f32, f32_to_fp16, cvt_f16_f32, cvt_f32_f16};
+    use crate::{cast_f16_f32, cast_f32_f16, f32_to_fp16, fp16_to_f32};
 
     #[test]
     fn zero_round_trip() {
@@ -87,10 +87,10 @@ mod fp16_tests {
     }
 
     #[test]
-    fn bulk_cvt_f16_f32_matches_scalar() {
+    fn bulk_cast_f16_f32_matches_scalar() {
         let src: Vec<u16> = (0..1000).collect();
         let mut bulk = vec![0.0f32; 1000];
-        cvt_f16_f32(&mut bulk, &src);
+        cast_f16_f32(&mut bulk, &src);
         for (i, &h) in src.iter().enumerate() {
             let scalar = fp16_to_f32(h);
             assert!(
@@ -104,10 +104,10 @@ mod fp16_tests {
     }
 
     #[test]
-    fn bulk_cvt_f32_f16_matches_scalar() {
+    fn bulk_cast_f32_f16_matches_scalar() {
         let src: Vec<f32> = (0..1000).map(|i| i as f32 * 0.1).collect();
         let mut bulk = vec![0u16; 1000];
-        cvt_f32_f16(&mut bulk, &src);
+        cast_f32_f16(&mut bulk, &src);
         for (i, &v) in src.iter().enumerate() {
             let scalar = f32_to_fp16(v);
             assert_eq!(
@@ -124,7 +124,7 @@ mod fp16_tests {
         for n in [0, 1, 7, 8, 9, 31, 32, 33, 63, 64, 65, 100] {
             let src: Vec<u16> = (0..n as u16).collect();
             let mut dst = vec![0.0f32; n];
-            cvt_f16_f32(&mut dst, &src);
+            cast_f16_f32(&mut dst, &src);
             for i in 0..n {
                 let expected = fp16_to_f32(src[i]);
                 assert!(
@@ -174,20 +174,20 @@ mod fp16_tests {
 
 #[cfg(test)]
 mod error_tests {
-    use crate::MetalError;
+    use crate::GpuError;
 
     #[test]
     fn error_display_all_variants() {
-        let variants: Vec<MetalError> = vec![
-            MetalError::DeviceNotFound,
-            MetalError::BufferCreationFailed("test".into()),
-            MetalError::LibraryCompilationFailed("bad msl".into()),
-            MetalError::FunctionNotFound("missing".into()),
-            MetalError::PipelineCreationFailed("fail".into()),
-            MetalError::CommandBufferError("oops".into()),
-            MetalError::EncoderCreationFailed,
-            MetalError::QueueCreationFailed,
-            MetalError::TextureCreationFailed("tex".into()),
+        let variants: Vec<GpuError> = vec![
+            GpuError::DeviceNotFound,
+            GpuError::BufferCreationFailed("test".into()),
+            GpuError::LibraryCompilationFailed("bad msl".into()),
+            GpuError::FunctionNotFound("missing".into()),
+            GpuError::PipelineCreationFailed("fail".into()),
+            GpuError::CommandBufferError("oops".into()),
+            GpuError::EncoderCreationFailed,
+            GpuError::QueueCreationFailed,
+            GpuError::TextureCreationFailed("tex".into()),
         ];
         for v in &variants {
             let s = format!("{}", v);
@@ -197,18 +197,18 @@ mod error_tests {
 
     #[test]
     fn error_is_error_trait() {
-        let e: Box<dyn std::error::Error> = Box::new(MetalError::DeviceNotFound);
+        let e: Box<dyn std::error::Error> = Box::new(GpuError::DeviceNotFound);
         assert!(!e.to_string().is_empty());
     }
 }
 
 #[cfg(test)]
 mod device_tests {
-    use crate::MtlDevice;
+    use crate::Gpu;
 
     #[test]
-    fn system_default_works() {
-        let dev = MtlDevice::system_default().unwrap();
+    fn open_works() {
+        let dev = Gpu::open().unwrap();
         let name = dev.name();
         assert!(!name.is_empty());
         assert!(dev.max_buffer_length() > 0);
@@ -216,42 +216,42 @@ mod device_tests {
 
     #[test]
     fn buffer_create_and_access() {
-        let dev = MtlDevice::system_default().unwrap();
-        let buf = dev.new_buffer(1024).unwrap();
+        let dev = Gpu::open().unwrap();
+        let buf = dev.buffer(1024).unwrap();
         assert_eq!(buf.size(), 1024);
         assert!(buf.is_shared());
-        buf.with_data_mut(|d| d[0] = 42);
-        buf.with_data(|d| assert_eq!(d[0], 42));
+        buf.write(|d| d[0] = 42);
+        buf.read(|d| assert_eq!(d[0], 42));
     }
 
     #[test]
-    fn buffer_with_data() {
-        let dev = MtlDevice::system_default().unwrap();
+    fn buffer_read() {
+        let dev = Gpu::open().unwrap();
         let data = vec![1u8, 2, 3, 4];
-        let buf = dev.new_buffer_with_data(&data).unwrap();
-        buf.with_data(|d| {
+        let buf = dev.buffer_with_data(&data).unwrap();
+        buf.read(|d| {
             assert_eq!(&d[..4], &[1, 2, 3, 4]);
         });
     }
 
     #[test]
     fn private_buffer_not_shared() {
-        let dev = MtlDevice::system_default().unwrap();
-        let buf = dev.new_buffer_private(1024).unwrap();
+        let dev = Gpu::open().unwrap();
+        let buf = dev.buffer_private(1024).unwrap();
         assert!(!buf.is_shared());
     }
 
     #[test]
     #[should_panic(expected = "private buffer")]
-    fn private_buffer_with_data_panics() {
-        let dev = MtlDevice::system_default().unwrap();
-        let buf = dev.new_buffer_private(1024).unwrap();
-        buf.with_data(|_| {});
+    fn private_buffer_read_panics() {
+        let dev = Gpu::open().unwrap();
+        let buf = dev.buffer_private(1024).unwrap();
+        buf.read(|_| {});
     }
 
     #[test]
     fn shader_compile_and_function() {
-        let dev = MtlDevice::system_default().unwrap();
+        let dev = Gpu::open().unwrap();
         let src = r#"
             #include <metal_stdlib>
             kernel void test_fn(device float *a [[buffer(0)]],
@@ -259,71 +259,69 @@ mod device_tests {
                 a[id] = 1.0;
             }
         "#;
-        let lib = dev.new_library_with_source(src).unwrap();
+        let lib = dev.compile(src).unwrap();
         let names = lib.function_names();
         assert!(names.contains(&"test_fn".to_string()));
-        let func = lib.get_function("test_fn").unwrap();
+        let func = lib.function("test_fn").unwrap();
         assert_eq!(func.name(), "test_fn");
     }
 
     #[test]
     fn shader_compile_error() {
-        let dev = MtlDevice::system_default().unwrap();
-        let result = dev.new_library_with_source("not valid msl!!!");
+        let dev = Gpu::open().unwrap();
+        let result = dev.compile("not valid msl!!!");
         assert!(result.is_err());
     }
 
     #[test]
     fn function_not_found() {
-        let dev = MtlDevice::system_default().unwrap();
+        let dev = Gpu::open().unwrap();
         let src = r#"
             #include <metal_stdlib>
             kernel void exists(device float *a [[buffer(0)]],
                               uint id [[thread_position_in_grid]]) { a[id] = 0; }
         "#;
-        let lib = dev.new_library_with_source(src).unwrap();
-        let result = lib.get_function("does_not_exist");
+        let lib = dev.compile(src).unwrap();
+        let result = lib.function("does_not_exist");
         assert!(result.is_err());
     }
 
     #[test]
     fn pipeline_properties() {
-        let dev = MtlDevice::system_default().unwrap();
+        let dev = Gpu::open().unwrap();
         let src = r#"
             #include <metal_stdlib>
             kernel void k(device float *a [[buffer(0)]],
                          uint id [[thread_position_in_grid]]) { a[id] = 0; }
         "#;
-        let lib = dev.new_library_with_source(src).unwrap();
-        let func = lib.get_function("k").unwrap();
-        let pipe = dev.new_compute_pipeline(&func).unwrap();
+        let lib = dev.compile(src).unwrap();
+        let func = lib.function("k").unwrap();
+        let pipe = dev.pipeline(&func).unwrap();
         assert!(pipe.max_total_threads_per_threadgroup() > 0);
         assert!(pipe.thread_execution_width() > 0);
     }
 
     #[test]
     fn gpu_timing() {
-        let dev = MtlDevice::system_default().unwrap();
+        let dev = Gpu::open().unwrap();
         let queue = dev.new_command_queue().unwrap();
         let src = r#"
             #include <metal_stdlib>
             kernel void k(device float *a [[buffer(0)]],
                          uint id [[thread_position_in_grid]]) { a[id] = 0; }
         "#;
-        let lib = dev.new_library_with_source(src).unwrap();
-        let pipe = dev
-            .new_compute_pipeline(&lib.get_function("k").unwrap())
-            .unwrap();
-        let buf = dev.new_buffer(256 * 4).unwrap();
+        let lib = dev.compile(src).unwrap();
+        let pipe = dev.pipeline(&lib.function("k").unwrap()).unwrap();
+        let buf = dev.buffer(256 * 4).unwrap();
 
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
-        enc.set_pipeline(&pipe);
-        enc.set_buffer(&buf, 0, 0);
-        enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
+        enc.bind(&pipe);
+        enc.bind_buffer(&buf, 0, 0);
+        enc.launch((256, 1, 1), (64, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
 
         assert!(cmd.gpu_time() > 0.0);
         assert!(cmd.gpu_time() < 1.0); // should be microseconds, not seconds
@@ -331,24 +329,24 @@ mod device_tests {
 
     #[test]
     fn sync_primitives() {
-        let dev = MtlDevice::system_default().unwrap();
-        let _fence = dev.new_fence().unwrap();
-        let _event = dev.new_event().unwrap();
-        let se = dev.new_shared_event().unwrap();
+        let dev = Gpu::open().unwrap();
+        let _fence = dev.fence().unwrap();
+        let _event = dev.event().unwrap();
+        let se = dev.shared_event().unwrap();
         assert_eq!(se.signaled_value(), 0);
     }
 
     #[test]
     fn buffer_zero_size_rejected() {
-        let dev = MtlDevice::system_default().unwrap();
-        assert!(dev.new_buffer(0).is_err());
-        assert!(dev.new_buffer_private(0).is_err());
+        let dev = Gpu::open().unwrap();
+        assert!(dev.buffer(0).is_err());
+        assert!(dev.buffer_private(0).is_err());
     }
 
     #[test]
     fn texture_create_and_properties() {
         use crate::ffi::*;
-        let dev = MtlDevice::system_default().unwrap();
+        let dev = Gpu::open().unwrap();
 
         // Create a texture descriptor for 16x16 RGBA8
         unsafe {
@@ -368,7 +366,7 @@ mod device_tests {
             set_u(desc, sel_registerName(c"setWidth:".as_ptr()), 16);
             set_u(desc, sel_registerName(c"setHeight:".as_ptr()), 16);
 
-            let tex = dev.new_texture(desc).unwrap();
+            let tex = dev.texture(desc).unwrap();
             assert_eq!(tex.width(), 16);
             assert_eq!(tex.height(), 16);
             assert_eq!(tex.depth(), 1);
@@ -380,9 +378,9 @@ mod device_tests {
 
     #[test]
     fn command_buffer_status_constants() {
-        use crate::MtlCommandBuffer;
-        assert_eq!(MtlCommandBuffer::STATUS_NOT_ENQUEUED, 0);
-        assert_eq!(MtlCommandBuffer::STATUS_COMPLETED, 4);
-        assert_eq!(MtlCommandBuffer::STATUS_ERROR, 5);
+        use crate::Commands;
+        assert_eq!(Commands::STATUS_NOT_ENQUEUED, 0);
+        assert_eq!(Commands::STATUS_COMPLETED, 4);
+        assert_eq!(Commands::STATUS_ERROR, 5);
     }
 }

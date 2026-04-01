@@ -20,22 +20,22 @@ pub mod shader;
 pub mod sync;
 pub mod texture;
 
-pub use buffer::MtlBuffer;
-pub use command::{MtlCommandBuffer, MtlCommandQueue};
-pub use device::MtlDevice;
-pub use dispatch::{BatchEncoder, ComputeDispatcher, GpuFuture};
-pub use encoder::{MtlBlitEncoder, MtlComputeEncoder};
-pub use pipeline::MtlComputePipeline;
-pub use shader::{MtlFunction, MtlLibrary};
-pub use sync::{MtlEvent, MtlFence, MtlSharedEvent};
-pub use texture::MtlTexture;
+pub use buffer::Buffer;
+pub use command::{Commands, Queue};
+pub use device::Gpu;
+pub use dispatch::{Batch, Dispatch, GpuFuture};
+pub use encoder::{Copier, Encoder};
+pub use pipeline::Pipeline;
+pub use shader::{Shader, ShaderLib};
+pub use sync::{Event, Fence, SharedEvent};
+pub use texture::Texture;
 
 // Re-export fp16 from acpu (single source of truth for numeric conversions)
-pub use acpu::{cvt_f16_f32, cvt_f32_f16};
-pub use acpu::numeric::fp16::{fp16_to_f32, f32_to_fp16};
+pub use acpu::numeric::fp16::{f32_to_fp16, fp16_to_f32};
+pub use acpu::{cast_f16_f32, cast_f32_f16};
 
 /// Execute a closure inside an autorelease pool.
-/// Use this to scope autoreleased ObjC objects (e.g. from `command_buffer_unretained`).
+/// Use this to scope autoreleased ObjC objects (e.g. from `commands_unretained`).
 /// The pool is drained even if the closure panics (unwind-safe).
 #[inline]
 pub fn autorelease_pool<F, R>(f: F) -> R
@@ -56,7 +56,7 @@ where
 /// Errors returned by aruminium operations.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum MetalError {
+pub enum GpuError {
     /// No Metal-capable GPU found on this system.
     DeviceNotFound,
     /// GPU buffer allocation failed.
@@ -79,33 +79,33 @@ pub enum MetalError {
     Io(std::io::Error),
 }
 
-impl std::fmt::Display for MetalError {
+impl std::fmt::Display for GpuError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MetalError::DeviceNotFound => write!(f, "No Metal device found"),
-            MetalError::BufferCreationFailed(msg) => write!(f, "Buffer creation failed: {}", msg),
-            MetalError::LibraryCompilationFailed(msg) => {
+            GpuError::DeviceNotFound => write!(f, "No Metal device found"),
+            GpuError::BufferCreationFailed(msg) => write!(f, "Buffer creation failed: {}", msg),
+            GpuError::LibraryCompilationFailed(msg) => {
                 write!(f, "Shader compilation failed: {}", msg)
             }
-            MetalError::FunctionNotFound(name) => write!(f, "Function not found: {}", name),
-            MetalError::PipelineCreationFailed(msg) => {
+            GpuError::FunctionNotFound(name) => write!(f, "Function not found: {}", name),
+            GpuError::PipelineCreationFailed(msg) => {
                 write!(f, "Pipeline creation failed: {}", msg)
             }
-            MetalError::CommandBufferError(msg) => write!(f, "Command buffer error: {}", msg),
-            MetalError::EncoderCreationFailed => write!(f, "Encoder creation failed"),
-            MetalError::QueueCreationFailed => write!(f, "Command queue creation failed"),
-            MetalError::TextureCreationFailed(msg) => {
+            GpuError::CommandBufferError(msg) => write!(f, "Command buffer error: {}", msg),
+            GpuError::EncoderCreationFailed => write!(f, "Encoder creation failed"),
+            GpuError::QueueCreationFailed => write!(f, "Command queue creation failed"),
+            GpuError::TextureCreationFailed(msg) => {
                 write!(f, "Texture creation failed: {}", msg)
             }
-            MetalError::Io(e) => write!(f, "IO error: {}", e),
+            GpuError::Io(e) => write!(f, "IO error: {}", e),
         }
     }
 }
 
-impl std::error::Error for MetalError {}
+impl std::error::Error for GpuError {}
 
-impl From<std::io::Error> for MetalError {
+impl From<std::io::Error> for GpuError {
     fn from(e: std::io::Error) -> Self {
-        MetalError::Io(e)
+        GpuError::Io(e)
     }
 }

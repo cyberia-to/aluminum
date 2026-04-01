@@ -1,13 +1,13 @@
-//! ComputeDispatcher: pre-resolved IMP dispatch engine for hot loops
+//! Dispatch: pre-resolved IMP dispatch engine for hot loops
 //!
 //! Resolves all ObjC method implementations at construction time.
 //! Hot path calls go through direct function pointers — no objc_msgSend,
 //! no selector lookup, no method cache check.
 
-use crate::buffer::MtlBuffer;
-use crate::command::MtlCommandQueue;
+use crate::buffer::Buffer;
+use crate::command::Queue;
 use crate::ffi::*;
-use crate::pipeline::MtlComputePipeline;
+use crate::pipeline::Pipeline;
 use std::ffi::c_void;
 
 // IMP type aliases for the hot path
@@ -37,7 +37,7 @@ unsafe fn resolve_imp<T>(cls: ObjcClass, sel: ObjcSel) -> T {
 ///
 /// Uses `commandBufferWithUnretainedReferences` — Metal skips internal
 /// retain/release on all resources, saving ~2μs per command buffer.
-pub struct ComputeDispatcher {
+pub struct Dispatch {
     queue: ObjcId,
     // Selectors (passed as IMP argument on every call)
     sel_cmd_buf: ObjcSel,
@@ -63,11 +63,11 @@ pub struct ComputeDispatcher {
     imp_end: ImpVoid,
 }
 
-impl ComputeDispatcher {
+impl Dispatch {
     /// Create a new dispatcher from a command queue.
     /// Resolves all ObjC method implementations eagerly.
-    /// Retains the queue — safe to drop the original `MtlCommandQueue`.
-    pub fn new(queue: &MtlCommandQueue) -> Self {
+    /// Retains the queue — safe to drop the original `Queue`.
+    pub fn new(queue: &Queue) -> Self {
         let q = queue.as_raw();
         unsafe { objc_retain(q) };
 
@@ -118,7 +118,7 @@ impl ComputeDispatcher {
             objc_release(enc);
             objc_release(cmd);
 
-            ComputeDispatcher {
+            Dispatch {
                 queue: q,
                 sel_cmd_buf,
                 sel_encoder,
@@ -155,8 +155,8 @@ impl ComputeDispatcher {
     #[inline(always)]
     pub unsafe fn dispatch(
         &self,
-        pipeline: &MtlComputePipeline,
-        buffers: &[(&MtlBuffer, usize, usize)],
+        pipeline: &Pipeline,
+        buffers: &[(&Buffer, usize, usize)],
         grid: (usize, usize, usize),
         group: (usize, usize, usize),
     ) {
@@ -194,8 +194,8 @@ impl ComputeDispatcher {
     #[inline(always)]
     pub unsafe fn dispatch_with_bytes(
         &self,
-        pipeline: &MtlComputePipeline,
-        buffers: &[(&MtlBuffer, usize, usize)],
+        pipeline: &Pipeline,
+        buffers: &[(&Buffer, usize, usize)],
         bytes: &[u8],
         bytes_index: usize,
         grid: (usize, usize, usize),
@@ -240,14 +240,14 @@ impl ComputeDispatcher {
     /// # Safety
     /// All resources must remain alive until completion.
     #[inline(always)]
-    pub unsafe fn dispatch_batch<F>(&self, encode: F)
+    pub unsafe fn batch<F>(&self, encode: F)
     where
-        F: FnOnce(&BatchEncoder),
+        F: FnOnce(&Batch),
     {
         let cmd = msg0_retained(self.queue, self.sel_cmd_buf);
         let enc = msg0_retained(cmd, self.sel_encoder);
 
-        let batch = BatchEncoder {
+        let batch = Batch {
             enc,
             imp_set_pipe: self.imp_set_pipe,
             imp_set_buf: self.imp_set_buf,
@@ -271,7 +271,7 @@ impl ComputeDispatcher {
         objc_release(cmd);
     }
 
-    /// Like `dispatch_batch` but without autorelease pool management.
+    /// Like `batch` but without autorelease pool management.
     /// Caller MUST be inside an `autorelease_pool` scope.
     /// Use this for multi-batch inference loops where the caller manages
     /// a single pool for the entire pass.
@@ -279,16 +279,16 @@ impl ComputeDispatcher {
     /// # Safety
     /// Must be inside `autorelease_pool`. All resources must remain alive.
     #[inline(always)]
-    pub unsafe fn dispatch_batch_raw<F>(&self, encode: F)
+    pub unsafe fn batch_raw<F>(&self, encode: F)
     where
-        F: FnOnce(&BatchEncoder),
+        F: FnOnce(&Batch),
     {
         let cmd = (self.imp_cmd_buf)(self.queue, self.sel_cmd_buf);
         assert!(!cmd.is_null(), "command buffer creation returned null");
         let enc = (self.imp_encoder)(cmd, self.sel_encoder);
         assert!(!enc.is_null(), "compute encoder creation returned null");
 
-        let batch = BatchEncoder {
+        let batch = Batch {
             enc,
             imp_set_pipe: self.imp_set_pipe,
             imp_set_buf: self.imp_set_buf,
@@ -316,7 +316,7 @@ impl ComputeDispatcher {
     /// ```ignore
     /// let mut prev = None;
     /// for pass in passes {
-    ///     let handle = disp.dispatch_batch_async(|batch| { ... });
+    ///     let handle = disp.batch_async(|batch| { ... });
     ///     if let Some(h) = prev { h.wait(); }
     ///     prev = Some(handle);
     /// }
@@ -326,14 +326,14 @@ impl ComputeDispatcher {
     /// # Safety
     /// All resources must remain alive until `GpuFuture::wait()` is called.
     #[inline(always)]
-    pub unsafe fn dispatch_batch_async<F>(&self, encode: F) -> GpuFuture
+    pub unsafe fn batch_async<F>(&self, encode: F) -> GpuFuture
     where
-        F: FnOnce(&BatchEncoder),
+        F: FnOnce(&Batch),
     {
         let cmd = msg0_retained(self.queue, self.sel_cmd_buf);
         let enc = msg0_retained(cmd, self.sel_encoder);
 
-        let batch = BatchEncoder {
+        let batch = Batch {
             enc,
             imp_set_pipe: self.imp_set_pipe,
             imp_set_buf: self.imp_set_buf,
@@ -361,7 +361,7 @@ impl ComputeDispatcher {
     }
 }
 
-impl Drop for ComputeDispatcher {
+impl Drop for Dispatch {
     fn drop(&mut self) {
         unsafe { objc_release(self.queue) };
     }
@@ -399,7 +399,7 @@ impl Drop for GpuFuture {
 }
 
 /// A batch encoder for encoding multiple dispatches into one command buffer.
-pub struct BatchEncoder {
+pub struct Batch {
     enc: ObjcId,
     imp_set_pipe: ImpObj,
     imp_set_buf: ImpBuf,
@@ -413,19 +413,19 @@ pub struct BatchEncoder {
     sel_dispatch_groups: ObjcSel,
 }
 
-impl BatchEncoder {
+impl Batch {
     #[inline(always)]
-    pub fn set_pipeline(&self, pipeline: &MtlComputePipeline) {
+    pub fn bind(&self, pipeline: &Pipeline) {
         unsafe { (self.imp_set_pipe)(self.enc, self.sel_set_pipe, pipeline.as_raw()) };
     }
 
     #[inline(always)]
-    pub fn set_buffer(&self, buffer: &MtlBuffer, offset: usize, index: usize) {
+    pub fn bind_buffer(&self, buffer: &Buffer, offset: usize, index: usize) {
         unsafe { (self.imp_set_buf)(self.enc, self.sel_set_buf, buffer.as_raw(), offset, index) };
     }
 
     #[inline(always)]
-    pub fn set_bytes(&self, data: &[u8], index: usize) {
+    pub fn push(&self, data: &[u8], index: usize) {
         unsafe {
             (self.imp_set_bytes)(
                 self.enc,
@@ -438,7 +438,7 @@ impl BatchEncoder {
     }
 
     #[inline(always)]
-    pub fn dispatch_threads(&self, grid: (usize, usize, usize), group: (usize, usize, usize)) {
+    pub fn launch(&self, grid: (usize, usize, usize), group: (usize, usize, usize)) {
         let g = MTLSize {
             width: grid.0,
             height: grid.1,
@@ -453,11 +453,7 @@ impl BatchEncoder {
     }
 
     #[inline(always)]
-    pub fn dispatch_threadgroups(
-        &self,
-        groups: (usize, usize, usize),
-        threads: (usize, usize, usize),
-    ) {
+    pub fn launch_groups(&self, groups: (usize, usize, usize), threads: (usize, usize, usize)) {
         let g = MTLSize {
             width: groups.0,
             height: groups.1,

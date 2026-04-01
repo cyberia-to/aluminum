@@ -1,6 +1,6 @@
 //! aruminium driver benchmarks — measures Metal.framework overhead
 
-use aruminium::MtlDevice;
+use aruminium::Gpu;
 use std::time::Instant;
 
 use super::shaders::{NOOP as NOOP_SRC, SAXPY as SAXPY_SRC};
@@ -8,32 +8,32 @@ use super::shaders::{NOOP as NOOP_SRC, SAXPY as SAXPY_SRC};
 // ── basic: device, buffer, shader ──
 
 pub fn device_discovery(iters: usize) -> f64 {
-    let _ = MtlDevice::system_default().unwrap();
+    let _ = Gpu::open().unwrap();
     let t0 = Instant::now();
     for _ in 0..iters {
-        let _ = MtlDevice::system_default().unwrap();
+        let _ = Gpu::open().unwrap();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn buffer_creation(iters: usize, size: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     for _ in 0..3 {
-        let _ = dev.new_buffer(size).unwrap();
+        let _ = dev.buffer(size).unwrap();
     }
     let t0 = Instant::now();
     for _ in 0..iters {
-        let _ = dev.new_buffer(size).unwrap();
+        let _ = dev.buffer(size).unwrap();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn shader_compile(iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
-    let _ = dev.new_library_with_source(SAXPY_SRC).unwrap();
+    let dev = Gpu::open().unwrap();
+    let _ = dev.compile(SAXPY_SRC).unwrap();
     let t0 = Instant::now();
     for _ in 0..iters {
-        let _ = dev.new_library_with_source(SAXPY_SRC).unwrap();
+        let _ = dev.compile(SAXPY_SRC).unwrap();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
@@ -41,81 +41,75 @@ pub fn shader_compile(iters: usize) -> f64 {
 // ── encode: overhead, unchecked, batch ──
 
 pub fn encode_overhead(iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
     let mut last_cmd = None;
     for _ in 0..iters {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
-        enc.set_pipeline(&pipe);
-        enc.set_buffer(&buf, 0, 0);
-        enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
+        enc.bind(&pipe);
+        enc.bind_buffer(&buf, 0, 0);
+        enc.launch((256, 1, 1), (64, 1, 1));
+        enc.finish();
+        cmd.submit();
         last_cmd = Some(cmd);
     }
     if let Some(cmd) = last_cmd {
-        cmd.wait_until_completed();
+        cmd.wait();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn encode_unchecked(iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
-    let mut last_cmd = None::<aruminium::MtlCommandBuffer>;
+    let mut last_cmd = None::<aruminium::Commands>;
     for _ in 0..iters {
         unsafe {
-            let cmd = queue.command_buffer_unchecked();
-            let enc = cmd.compute_encoder_unchecked();
-            enc.set_pipeline(&pipe);
-            enc.set_buffer(&buf, 0, 0);
-            enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-            enc.end_encoding();
-            cmd.commit();
+            let cmd = queue.commands_unchecked();
+            let enc = cmd.encoder_unchecked();
+            enc.bind(&pipe);
+            enc.bind_buffer(&buf, 0, 0);
+            enc.launch((256, 1, 1), (64, 1, 1));
+            enc.finish();
+            cmd.submit();
             last_cmd = Some(cmd);
         }
     }
     if let Some(cmd) = last_cmd {
-        cmd.wait_until_completed();
+        cmd.wait();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn batch_encode(batch_size: usize, iters: usize) -> f64 {
-    use aruminium::ComputeDispatcher;
-    let dev = MtlDevice::system_default().unwrap();
+    use aruminium::Dispatch;
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
-    let disp = ComputeDispatcher::new(&queue);
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
+    let disp = Dispatch::new(&queue);
 
     for _ in 0..3 {
         unsafe {
-            disp.dispatch_batch(|b| {
+            disp.batch(|b| {
                 for _ in 0..batch_size {
-                    b.set_pipeline(&pipe);
-                    b.set_buffer(&buf, 0, 0);
-                    b.dispatch_threads((256, 1, 1), (64, 1, 1));
+                    b.bind(&pipe);
+                    b.bind_buffer(&buf, 0, 0);
+                    b.launch((256, 1, 1), (64, 1, 1));
                 }
             });
         }
@@ -123,11 +117,11 @@ pub fn batch_encode(batch_size: usize, iters: usize) -> f64 {
     let t0 = Instant::now();
     for _ in 0..iters {
         unsafe {
-            disp.dispatch_batch(|b| {
+            disp.batch(|b| {
                 for _ in 0..batch_size {
-                    b.set_pipeline(&pipe);
-                    b.set_buffer(&buf, 0, 0);
-                    b.dispatch_threads((256, 1, 1), (64, 1, 1));
+                    b.bind(&pipe);
+                    b.bind_buffer(&buf, 0, 0);
+                    b.launch((256, 1, 1), (64, 1, 1));
                 }
             });
         }
@@ -136,38 +130,36 @@ pub fn batch_encode(batch_size: usize, iters: usize) -> f64 {
 }
 
 pub fn encode_encoder(batch_size: usize, iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
 
     for _ in 0..3 {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
         for _ in 0..batch_size {
-            enc.set_pipeline(&pipe);
-            enc.set_buffer(&buf, 0, 0);
-            enc.dispatch_threads((256, 1, 1), (64, 1, 1));
+            enc.bind(&pipe);
+            enc.bind_buffer(&buf, 0, 0);
+            enc.launch((256, 1, 1), (64, 1, 1));
         }
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
     let t0 = Instant::now();
     for _ in 0..iters {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
         for _ in 0..batch_size {
-            enc.set_pipeline(&pipe);
-            enc.set_buffer(&buf, 0, 0);
-            enc.dispatch_threads((256, 1, 1), (64, 1, 1));
+            enc.bind(&pipe);
+            enc.bind_buffer(&buf, 0, 0);
+            enc.launch((256, 1, 1), (64, 1, 1));
         }
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
     t0.elapsed().as_secs_f64() / (iters * batch_size) as f64
 }
@@ -175,77 +167,71 @@ pub fn encode_encoder(batch_size: usize, iters: usize) -> f64 {
 // ── dispatch: overhead, unchecked, autoreleased, raw, IMP, pipelined ──
 
 pub fn dispatch_overhead(iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
     for _ in 0..iters {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
-        enc.set_pipeline(&pipe);
-        enc.set_buffer(&buf, 0, 0);
-        enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
+        enc.bind(&pipe);
+        enc.bind_buffer(&buf, 0, 0);
+        enc.launch((256, 1, 1), (64, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn dispatch_unchecked(iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
     for _ in 0..iters {
         unsafe {
-            let cmd = queue.command_buffer_unchecked();
-            let enc = cmd.compute_encoder_unchecked();
-            enc.set_pipeline(&pipe);
-            enc.set_buffer(&buf, 0, 0);
-            enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-            enc.end_encoding();
-            cmd.commit();
-            cmd.wait_until_completed();
+            let cmd = queue.commands_unchecked();
+            let enc = cmd.encoder_unchecked();
+            enc.bind(&pipe);
+            enc.bind_buffer(&buf, 0, 0);
+            enc.launch((256, 1, 1), (64, 1, 1));
+            enc.finish();
+            cmd.submit();
+            cmd.wait();
         }
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn dispatch_autoreleased(iters: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
     warmup(&queue, &pipe, &buf);
 
     let t0 = Instant::now();
     aruminium::autorelease_pool(|| {
         for _ in 0..iters {
             unsafe {
-                let cmd = queue.command_buffer_autoreleased();
-                let enc = cmd.compute_encoder_autoreleased();
-                enc.set_pipeline(&pipe);
-                enc.set_buffer(&buf, 0, 0);
-                enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-                enc.end_encoding();
-                cmd.commit();
-                cmd.wait_until_completed();
+                let cmd = queue.commands_autoreleased();
+                let enc = cmd.encoder_autoreleased();
+                enc.bind(&pipe);
+                enc.bind_buffer(&buf, 0, 0);
+                enc.launch((256, 1, 1), (64, 1, 1));
+                enc.finish();
+                cmd.submit();
+                cmd.wait();
             }
         }
     });
@@ -256,13 +242,11 @@ pub fn dispatch_raw(iters: usize) -> f64 {
     use aruminium::ffi::*;
     use std::ffi::c_void;
 
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
     warmup(&queue, &pipe, &buf);
 
     let q = queue.as_raw();
@@ -318,15 +302,13 @@ pub fn dispatch_raw(iters: usize) -> f64 {
 }
 
 pub fn dispatch_imp(iters: usize) -> f64 {
-    use aruminium::ComputeDispatcher;
-    let dev = MtlDevice::system_default().unwrap();
+    use aruminium::Dispatch;
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
-    let disp = ComputeDispatcher::new(&queue);
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
+    let disp = Dispatch::new(&queue);
     for _ in 0..10 {
         unsafe { disp.dispatch(&pipe, &[(&buf, 0, 0)], (256, 1, 1), (64, 1, 1)) };
     }
@@ -338,15 +320,13 @@ pub fn dispatch_imp(iters: usize) -> f64 {
 }
 
 pub fn dispatch_pipelined(iters: usize) -> f64 {
-    use aruminium::ComputeDispatcher;
-    let dev = MtlDevice::system_default().unwrap();
+    use aruminium::Dispatch;
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(NOOP_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("noop").unwrap())
-        .unwrap();
-    let buf = dev.new_buffer(256 * 4).unwrap();
-    let disp = ComputeDispatcher::new(&queue);
+    let lib = dev.compile(NOOP_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("noop").unwrap()).unwrap();
+    let buf = dev.buffer(256 * 4).unwrap();
+    let disp = Dispatch::new(&queue);
     for _ in 0..10 {
         unsafe { disp.dispatch(&pipe, &[(&buf, 0, 0)], (256, 1, 1), (64, 1, 1)) };
     }
@@ -355,10 +335,10 @@ pub fn dispatch_pipelined(iters: usize) -> f64 {
     let mut prev = None;
     for _ in 0..iters {
         let future = unsafe {
-            disp.dispatch_batch_async(|batch| {
-                batch.set_pipeline(&pipe);
-                batch.set_buffer(&buf, 0, 0);
-                batch.dispatch_threads((256, 1, 1), (64, 1, 1));
+            disp.batch_async(|batch| {
+                batch.bind(&pipe);
+                batch.bind_buffer(&buf, 0, 0);
+                batch.launch((256, 1, 1), (64, 1, 1));
             })
         };
         if let Some(p) = prev {
@@ -375,70 +355,66 @@ pub fn dispatch_pipelined(iters: usize) -> f64 {
 // ── compute: SAXPY, inference sim ──
 
 pub fn large_compute(iters: usize, n: usize) -> f64 {
-    let dev = MtlDevice::system_default().unwrap();
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(SAXPY_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("saxpy").unwrap())
-        .unwrap();
-    let buf_x = dev.new_buffer(n * 4).unwrap();
-    let buf_y = dev.new_buffer(n * 4).unwrap();
-    buf_x.with_f32_mut(|d| {
+    let lib = dev.compile(SAXPY_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("saxpy").unwrap()).unwrap();
+    let buf_x = dev.buffer(n * 4).unwrap();
+    let buf_y = dev.buffer(n * 4).unwrap();
+    buf_x.write_f32(|d| {
         for (i, v) in d.iter_mut().enumerate() {
             *v = i as f32;
         }
     });
-    buf_y.with_f32_mut(|d| d.fill(1.0));
+    buf_y.write_f32(|d| d.fill(1.0));
     let a_bytes = 2.0f32.to_le_bytes();
 
     for _ in 0..3 {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
-        enc.set_pipeline(&pipe);
-        enc.set_buffer(&buf_x, 0, 0);
-        enc.set_buffer(&buf_y, 0, 1);
-        enc.set_bytes(&a_bytes, 2);
-        enc.dispatch_threads((n, 1, 1), (256, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
+        enc.bind(&pipe);
+        enc.bind_buffer(&buf_x, 0, 0);
+        enc.bind_buffer(&buf_y, 0, 1);
+        enc.push(&a_bytes, 2);
+        enc.launch((n, 1, 1), (256, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
-    buf_y.with_f32_mut(|d| d.fill(1.0));
+    buf_y.write_f32(|d| d.fill(1.0));
 
     let t0 = Instant::now();
     for _ in 0..iters {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
-        enc.set_pipeline(&pipe);
-        enc.set_buffer(&buf_x, 0, 0);
-        enc.set_buffer(&buf_y, 0, 1);
-        enc.set_bytes(&a_bytes, 2);
-        enc.dispatch_threads((n, 1, 1), (256, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
+        enc.bind(&pipe);
+        enc.bind_buffer(&buf_x, 0, 0);
+        enc.bind_buffer(&buf_y, 0, 1);
+        enc.push(&a_bytes, 2);
+        enc.launch((n, 1, 1), (256, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
     t0.elapsed().as_secs_f64() / iters as f64
 }
 
 pub fn large_compute_imp(iters: usize, n: usize) -> f64 {
-    use aruminium::ComputeDispatcher;
-    let dev = MtlDevice::system_default().unwrap();
+    use aruminium::Dispatch;
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
-    let lib = dev.new_library_with_source(SAXPY_SRC).unwrap();
-    let pipe = dev
-        .new_compute_pipeline(&lib.get_function("saxpy").unwrap())
-        .unwrap();
-    let buf_x = dev.new_buffer(n * 4).unwrap();
-    let buf_y = dev.new_buffer(n * 4).unwrap();
-    buf_x.with_f32_mut(|d| {
+    let lib = dev.compile(SAXPY_SRC).unwrap();
+    let pipe = dev.pipeline(&lib.function("saxpy").unwrap()).unwrap();
+    let buf_x = dev.buffer(n * 4).unwrap();
+    let buf_y = dev.buffer(n * 4).unwrap();
+    buf_x.write_f32(|d| {
         for (i, v) in d.iter_mut().enumerate() {
             *v = i as f32;
         }
     });
-    buf_y.with_f32_mut(|d| d.fill(1.0));
+    buf_y.write_f32(|d| d.fill(1.0));
     let ab = 2.0f32.to_le_bytes();
-    let disp = ComputeDispatcher::new(&queue);
+    let disp = Dispatch::new(&queue);
 
     for _ in 0..3 {
         unsafe {
@@ -452,7 +428,7 @@ pub fn large_compute_imp(iters: usize, n: usize) -> f64 {
             );
         }
     }
-    buf_y.with_f32_mut(|d| d.fill(1.0));
+    buf_y.write_f32(|d| d.fill(1.0));
 
     let t0 = Instant::now();
     for _ in 0..iters {
@@ -471,8 +447,8 @@ pub fn large_compute_imp(iters: usize, n: usize) -> f64 {
 }
 
 pub fn inference_sim(layers: usize, iters: usize) -> f64 {
-    use aruminium::ComputeDispatcher;
-    let dev = MtlDevice::system_default().unwrap();
+    use aruminium::Dispatch;
+    let dev = Gpu::open().unwrap();
     let queue = dev.new_command_queue().unwrap();
     let src = r#"
         #include <metal_stdlib>
@@ -483,21 +459,15 @@ pub fn inference_sim(layers: usize, iters: usize) -> f64 {
         kernel void add_k(device float *a [[buffer(0)]], device float *b [[buffer(1)]],
                           uint id [[thread_position_in_grid]]) { a[id] = a[id] + b[id]; }
     "#;
-    let lib = dev.new_library_with_source(src).unwrap();
-    let matmul = dev
-        .new_compute_pipeline(&lib.get_function("matmul_k").unwrap())
-        .unwrap();
-    let relu = dev
-        .new_compute_pipeline(&lib.get_function("relu_k").unwrap())
-        .unwrap();
-    let add = dev
-        .new_compute_pipeline(&lib.get_function("add_k").unwrap())
-        .unwrap();
+    let lib = dev.compile(src).unwrap();
+    let matmul = dev.pipeline(&lib.function("matmul_k").unwrap()).unwrap();
+    let relu = dev.pipeline(&lib.function("relu_k").unwrap()).unwrap();
+    let add = dev.pipeline(&lib.function("add_k").unwrap()).unwrap();
     let n = 4096usize;
-    let buf_a = dev.new_buffer(n * 4).unwrap();
-    let buf_b = dev.new_buffer(n * 4).unwrap();
-    let buf_c = dev.new_buffer(n * 4).unwrap();
-    let disp = ComputeDispatcher::new(&queue);
+    let buf_a = dev.buffer(n * 4).unwrap();
+    let buf_b = dev.buffer(n * 4).unwrap();
+    let buf_c = dev.buffer(n * 4).unwrap();
+    let disp = Dispatch::new(&queue);
 
     for _ in 0..3 {
         unsafe {
@@ -519,49 +489,45 @@ pub fn inference_sim(layers: usize, iters: usize) -> f64 {
 
 // ── helpers ──
 
-fn warmup(
-    queue: &aruminium::MtlCommandQueue,
-    pipe: &aruminium::MtlComputePipeline,
-    buf: &aruminium::MtlBuffer,
-) {
+fn warmup(queue: &aruminium::Queue, pipe: &aruminium::Pipeline, buf: &aruminium::Buffer) {
     for _ in 0..10 {
-        let cmd = queue.command_buffer().unwrap();
-        let enc = cmd.compute_encoder().unwrap();
-        enc.set_pipeline(pipe);
-        enc.set_buffer(buf, 0, 0);
-        enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands().unwrap();
+        let enc = cmd.encoder().unwrap();
+        enc.bind(pipe);
+        enc.bind_buffer(buf, 0, 0);
+        enc.launch((256, 1, 1), (64, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 unsafe fn dispatch_layers(
-    disp: &aruminium::ComputeDispatcher,
-    matmul: &aruminium::MtlComputePipeline,
-    relu: &aruminium::MtlComputePipeline,
-    add: &aruminium::MtlComputePipeline,
-    buf_a: &aruminium::MtlBuffer,
-    buf_b: &aruminium::MtlBuffer,
-    buf_c: &aruminium::MtlBuffer,
+    disp: &aruminium::Dispatch,
+    matmul: &aruminium::Pipeline,
+    relu: &aruminium::Pipeline,
+    add: &aruminium::Pipeline,
+    buf_a: &aruminium::Buffer,
+    buf_b: &aruminium::Buffer,
+    buf_c: &aruminium::Buffer,
     n: usize,
     layers: usize,
 ) {
-    disp.dispatch_batch(|b| {
+    disp.batch(|b| {
         for _ in 0..layers {
-            b.set_pipeline(matmul);
-            b.set_buffer(buf_a, 0, 0);
-            b.set_buffer(buf_b, 0, 1);
-            b.set_buffer(buf_c, 0, 2);
-            b.dispatch_threads((n, 1, 1), (256, 1, 1));
-            b.set_pipeline(relu);
-            b.set_buffer(buf_c, 0, 0);
-            b.dispatch_threads((n, 1, 1), (256, 1, 1));
-            b.set_pipeline(add);
-            b.set_buffer(buf_a, 0, 0);
-            b.set_buffer(buf_c, 0, 1);
-            b.dispatch_threads((n, 1, 1), (256, 1, 1));
+            b.bind(matmul);
+            b.bind_buffer(buf_a, 0, 0);
+            b.bind_buffer(buf_b, 0, 1);
+            b.bind_buffer(buf_c, 0, 2);
+            b.launch((n, 1, 1), (256, 1, 1));
+            b.bind(relu);
+            b.bind_buffer(buf_c, 0, 0);
+            b.launch((n, 1, 1), (256, 1, 1));
+            b.bind(add);
+            b.bind_buffer(buf_a, 0, 0);
+            b.bind_buffer(buf_c, 0, 1);
+            b.launch((n, 1, 1), (256, 1, 1));
         }
     });
 }

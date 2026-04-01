@@ -1,30 +1,30 @@
-//! MtlComputeEncoder + MtlBlitEncoder
+//! Encoder + Copier
 
-use crate::buffer::MtlBuffer;
+use crate::buffer::Buffer;
 use crate::ffi::*;
-use crate::pipeline::MtlComputePipeline;
+use crate::pipeline::Pipeline;
 use std::ffi::c_void;
 
 /// A compute command encoder. Wraps `id<MTLComputeCommandEncoder>`.
-pub struct MtlComputeEncoder {
+pub struct Encoder {
     raw: ObjcId,
     owned: bool,
 }
 
-impl MtlComputeEncoder {
+impl Encoder {
     pub(crate) fn from_raw(raw: ObjcId, owned: bool) -> Self {
-        MtlComputeEncoder { raw, owned }
+        Encoder { raw, owned }
     }
 
-    /// Set the compute pipeline state.
+    /// Bind a compute pipeline state.
     #[inline(always)]
-    pub fn set_pipeline(&self, pipeline: &MtlComputePipeline) {
+    pub fn bind(&self, pipeline: &Pipeline) {
         unsafe { msg1_void(self.raw, SEL_setComputePipelineState(), pipeline.as_raw()) };
     }
 
-    /// Set a buffer at an index.
+    /// Bind a buffer at an index.
     #[inline(always)]
-    pub fn set_buffer(&self, buffer: &MtlBuffer, offset: usize, index: usize) {
+    pub fn bind_buffer(&self, buffer: &Buffer, offset: usize, index: usize) {
         unsafe {
             msg3_void(
                 self.raw,
@@ -36,9 +36,9 @@ impl MtlComputeEncoder {
         };
     }
 
-    /// Set inline bytes at an index.
+    /// Push inline bytes at an index.
     #[inline(always)]
-    pub fn set_bytes(&self, data: &[u8], index: usize) {
+    pub fn push(&self, data: &[u8], index: usize) {
         unsafe {
             msg_bytes_void(
                 self.raw,
@@ -50,9 +50,9 @@ impl MtlComputeEncoder {
         };
     }
 
-    /// Dispatch threads with automatic threadgroup sizing.
+    /// Launch threads with automatic threadgroup sizing.
     #[inline(always)]
-    pub fn dispatch_threads(&self, grid: (usize, usize, usize), group: (usize, usize, usize)) {
+    pub fn launch(&self, grid: (usize, usize, usize), group: (usize, usize, usize)) {
         let g = MTLSize {
             width: grid.0,
             height: grid.1,
@@ -68,11 +68,7 @@ impl MtlComputeEncoder {
 
     /// Dispatch threadgroups with explicit group count.
     #[inline(always)]
-    pub fn dispatch_threadgroups(
-        &self,
-        groups: (usize, usize, usize),
-        threads: (usize, usize, usize),
-    ) {
+    pub fn launch_groups(&self, groups: (usize, usize, usize), threads: (usize, usize, usize)) {
         let g = MTLSize {
             width: groups.0,
             height: groups.1,
@@ -86,9 +82,9 @@ impl MtlComputeEncoder {
         unsafe { msg_dispatch_void(self.raw, SEL_dispatchThreadgroups(), g, t) };
     }
 
-    /// End encoding. Must be called before committing the command buffer.
+    /// Finish encoding. Must be called before submitting the command buffer.
     #[inline(always)]
-    pub fn end_encoding(&self) {
+    pub fn finish(&self) {
         unsafe { msg0_void(self.raw, SEL_endEncoding()) };
     }
 
@@ -97,7 +93,7 @@ impl MtlComputeEncoder {
     }
 }
 
-impl Drop for MtlComputeEncoder {
+impl Drop for Encoder {
     fn drop(&mut self) {
         if self.owned {
             unsafe { release_nonnull(self.raw) };
@@ -106,21 +102,21 @@ impl Drop for MtlComputeEncoder {
 }
 
 /// A blit command encoder. Wraps `id<MTLBlitCommandEncoder>`.
-pub struct MtlBlitEncoder {
+pub struct Copier {
     raw: ObjcId,
 }
 
-impl MtlBlitEncoder {
+impl Copier {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlBlitEncoder { raw }
+        Copier { raw }
     }
 
     /// Copy from one buffer to another.
-    pub fn copy_buffer(
+    pub fn copy(
         &self,
-        src: &MtlBuffer,
+        src: &Buffer,
         src_offset: usize,
-        dst: &MtlBuffer,
+        dst: &Buffer,
         dst_offset: usize,
         size: usize,
     ) {
@@ -149,7 +145,7 @@ impl MtlBlitEncoder {
 
     /// End encoding.
     #[inline(always)]
-    pub fn end_encoding(&self) {
+    pub fn finish(&self) {
         unsafe { msg0_void(self.raw, SEL_endEncoding()) };
     }
 
@@ -158,7 +154,7 @@ impl MtlBlitEncoder {
     }
 }
 
-impl Drop for MtlBlitEncoder {
+impl Drop for Copier {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }

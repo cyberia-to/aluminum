@@ -1,20 +1,20 @@
-//! MtlLibrary + MtlFunction: shader compilation from Metal Shading Language
+//! ShaderLib + Shader: shader compilation from Metal Shading Language
 
 use crate::ffi::*;
-use crate::MetalError;
+use crate::GpuError;
 
 /// A compiled shader library. Wraps `id<MTLLibrary>`.
-pub struct MtlLibrary {
+pub struct ShaderLib {
     raw: ObjcId,
 }
 
-impl MtlLibrary {
+impl ShaderLib {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlLibrary { raw }
+        ShaderLib { raw }
     }
 
     /// Get a function by name from the library.
-    pub fn get_function(&self, name: &str) -> Result<MtlFunction, MetalError> {
+    pub fn function(&self, name: &str) -> Result<Shader, GpuError> {
         let ns_name = nsstring(name);
         let raw = unsafe {
             let r = msg1::<ObjcId>(self.raw, SEL_newFunctionWithName(), ns_name);
@@ -22,9 +22,9 @@ impl MtlLibrary {
             r
         };
         if raw.is_null() {
-            return Err(MetalError::FunctionNotFound(name.into()));
+            return Err(GpuError::FunctionNotFound(name.into()));
         }
-        Ok(MtlFunction { raw })
+        Ok(Shader { raw })
     }
 
     /// List all function names in the library.
@@ -51,18 +51,18 @@ impl MtlLibrary {
     }
 }
 
-impl Drop for MtlLibrary {
+impl Drop for ShaderLib {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }
 }
 
 /// A single shader function. Wraps `id<MTLFunction>`.
-pub struct MtlFunction {
+pub struct Shader {
     raw: ObjcId,
 }
 
-impl MtlFunction {
+impl Shader {
     pub fn name(&self) -> String {
         unsafe {
             let ns = msg0(self.raw, SEL_name());
@@ -75,7 +75,7 @@ impl MtlFunction {
     }
 }
 
-impl Drop for MtlFunction {
+impl Drop for Shader {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }

@@ -5,10 +5,10 @@ the lightest metal.
 pure Rust Apple Metal GPU driver. zero external dependencies. direct `objc_msgSend` FFI to Metal.framework — no objc runtime, no Swift, no headers.
 
 ```rust,ignore
-let device = aruminium::MtlDevice::system_default()?;
+let device = aruminium::Gpu::open()?;
 let queue = device.new_command_queue()?;
 
-let lib = device.new_library_with_source(r#"
+let lib = device.compile(r#"
     #include <metal_stdlib>
     kernel void add(device float *a [[buffer(0)]],
                     device float *b [[buffer(1)]],
@@ -18,17 +18,17 @@ let lib = device.new_library_with_source(r#"
     }
 "#)?;
 
-let pipe = device.new_compute_pipeline(&lib.get_function("add")?)?;
-let buf = device.new_buffer(n * 4)?;
+let pipe = device.pipeline(&lib.function("add")?)?;
+let buf = device.buffer(n * 4)?;
 
-let cmd = queue.command_buffer()?;
-let enc = cmd.compute_encoder()?;
-enc.set_pipeline(&pipe);
-enc.set_buffer(&buf, 0, 0);
-enc.dispatch_threads((n, 1, 1), (256, 1, 1));
-enc.end_encoding();
-cmd.commit();
-cmd.wait_until_completed();
+let cmd = queue.commands()?;
+let enc = cmd.encoder()?;
+enc.bind(&pipe);
+enc.bind_buffer(&buf, 0, 0);
+enc.launch((n, 1, 1), (256, 1, 1));
+enc.finish();
+cmd.submit();
+cmd.wait();
 ```
 
 ## numbers
@@ -58,33 +58,33 @@ same GPU, same work. aruminium is lighter.
 
 ```rust,ignore
 // device
-MtlDevice::system_default() -> Result<MtlDevice>
+Gpu::open() -> Result<Gpu>
 device.name() -> String
 device.has_unified_memory() -> bool
 
 // buffers
-device.new_buffer(bytes) -> Result<MtlBuffer>
-device.new_buffer_with_data(&[u8]) -> Result<MtlBuffer>
-buf.with_data(|&[u8]|)
-buf.with_f32_mut(|&mut [f32]|)
+device.buffer(bytes) -> Result<Buffer>
+device.buffer_with_data(&[u8]) -> Result<Buffer>
+buf.read(|&[u8]|)
+buf.write_f32(|&mut [f32]|)
 
 // shaders
-device.new_library_with_source(&str) -> Result<MtlLibrary>
-lib.get_function(&str) -> Result<MtlFunction>
-device.new_compute_pipeline(&MtlFunction) -> Result<MtlComputePipeline>
+device.compile(&str) -> Result<ShaderLib>
+lib.function(&str) -> Result<Shader>
+device.pipeline(&Shader) -> Result<Pipeline>
 
 // dispatch
-queue.command_buffer() -> Result<MtlCommandBuffer>
-cmd.compute_encoder() -> Result<MtlComputeEncoder>
-enc.set_pipeline(&pipe)
-enc.set_buffer(&buf, offset, index)
-enc.dispatch_threadgroups(grid, group)
-enc.end_encoding()
-cmd.commit()
-cmd.wait_until_completed()
+queue.commands() -> Result<Commands>
+cmd.encoder() -> Result<Encoder>
+enc.bind(&pipe)
+enc.bind_buffer(&buf, offset, index)
+enc.launch_groups(grid, group)
+enc.finish()
+cmd.submit()
+cmd.wait()
 
 // sync
-MtlFence, MtlEvent, MtlSharedEvent
+Fence, Event, SharedEvent
 
 // profiling
 cmd.gpu_time() -> f64
@@ -93,8 +93,8 @@ pipeline.static_threadgroup_memory_length() -> usize
 // fp16
 aruminium::f32_to_fp16(f32) -> u16
 aruminium::fp16_to_f32(u16) -> f32
-aruminium::cvt_f32_to_f16(&[f32], &mut [u16])  // bulk NEON
-aruminium::cvt_f16_to_f32(&[u16], &mut [f32])  // bulk NEON
+aruminium::cast_f32_f16(&mut [u16], &[f32])  // bulk NEON
+aruminium::cast_f16_f32(&mut [f32], &[u16])  // bulk NEON
 ```
 
 ## build

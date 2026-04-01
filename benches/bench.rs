@@ -3,11 +3,11 @@
 //! Layer 1 only: measures hardware driver performance.
 //! No matmul, no attention, no model knowledge.
 
-use aruminium::{MetalError, MtlDevice};
+use aruminium::{Gpu, GpuError};
 use std::time::Instant;
 
-fn main() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn main() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     println!("Device: {}", device.name());
     println!("Unified memory: {}", device.has_unified_memory());
     println!(
@@ -22,7 +22,7 @@ fn main() -> Result<(), MetalError> {
     let sizes = [1024, 1024 * 1024, 64 * 1024 * 1024];
     for &size in &sizes {
         let t0 = Instant::now();
-        let _buf = device.new_buffer(size)?;
+        let _buf = device.buffer(size)?;
         let dt = t0.elapsed();
         println!(
             "Buffer {} MB: {:.2} ms",
@@ -41,9 +41,9 @@ fn main() -> Result<(), MetalError> {
             a[id] = a[id] + 1.0;
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
-    let func = lib.get_function("noop")?;
-    let pipeline = device.new_compute_pipeline(&func)?;
+    let lib = device.compile(source)?;
+    let func = lib.function("noop")?;
+    let pipeline = device.pipeline(&func)?;
 
     println!(
         "Pipeline: max_threads={}, simd_width={}, TG_mem={}",
@@ -53,8 +53,8 @@ fn main() -> Result<(), MetalError> {
     );
 
     let n = 1024 * 1024usize;
-    let buf = device.new_buffer(n * 4)?;
-    buf.with_f32_mut(|d| {
+    let buf = device.buffer(n * 4)?;
+    buf.write_f32(|d| {
         for v in d.iter_mut().take(n) {
             *v = 0.0;
         }
@@ -62,14 +62,14 @@ fn main() -> Result<(), MetalError> {
 
     // Warmup
     for _ in 0..3 {
-        let cmd = queue.command_buffer()?;
-        let enc = cmd.compute_encoder()?;
-        enc.set_pipeline(&pipeline);
-        enc.set_buffer(&buf, 0, 0);
-        enc.dispatch_threads((n, 1, 1), (256, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands()?;
+        let enc = cmd.encoder()?;
+        enc.bind(&pipeline);
+        enc.bind_buffer(&buf, 0, 0);
+        enc.launch((n, 1, 1), (256, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
     }
 
     // Benchmark: CPU time vs GPU time
@@ -77,14 +77,14 @@ fn main() -> Result<(), MetalError> {
     let mut gpu_total = 0.0f64;
     let t0 = Instant::now();
     for _ in 0..iters {
-        let cmd = queue.command_buffer()?;
-        let enc = cmd.compute_encoder()?;
-        enc.set_pipeline(&pipeline);
-        enc.set_buffer(&buf, 0, 0);
-        enc.dispatch_threads((n, 1, 1), (256, 1, 1));
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        let cmd = queue.commands()?;
+        let enc = cmd.encoder()?;
+        enc.bind(&pipeline);
+        enc.bind_buffer(&buf, 0, 0);
+        enc.launch((n, 1, 1), (256, 1, 1));
+        enc.finish();
+        cmd.submit();
+        cmd.wait();
         gpu_total += cmd.gpu_time();
     }
     let cpu_total = t0.elapsed().as_secs_f64();
@@ -110,13 +110,13 @@ fn main() -> Result<(), MetalError> {
     let mut dst16 = vec![0u16; n16];
     let src32: Vec<f32> = (0..n16).map(|i| i as f32 * 0.001).collect();
 
-    aruminium::cvt_f16_f32(&mut dst32, &src16);
-    aruminium::cvt_f32_f16(&mut dst16, &src32);
+    aruminium::cast_f16_f32(&mut dst32, &src16);
+    aruminium::cast_f32_f16(&mut dst16, &src32);
 
     let iters = 20;
     let t0 = Instant::now();
     for _ in 0..iters {
-        aruminium::cvt_f16_f32(&mut dst32, &src16);
+        aruminium::cast_f16_f32(&mut dst32, &src16);
     }
     let dt = t0.elapsed();
     let bw = (n16 as f64 * (2 + 4) as f64 * iters as f64) / dt.as_secs_f64() / 1e9;
@@ -129,7 +129,7 @@ fn main() -> Result<(), MetalError> {
 
     let t0 = Instant::now();
     for _ in 0..iters {
-        aruminium::cvt_f32_f16(&mut dst16, &src32);
+        aruminium::cast_f32_f16(&mut dst16, &src32);
     }
     let dt = t0.elapsed();
     let bw = (n16 as f64 * (4 + 2) as f64 * iters as f64) / dt.as_secs_f64() / 1e9;

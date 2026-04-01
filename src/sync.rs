@@ -1,15 +1,15 @@
-//! Synchronization primitives: MtlFence, MtlEvent, MtlSharedEvent
+//! Synchronization primitives: Fence, Event, SharedEvent
 
 use crate::ffi::*;
 
 /// A fence for tracking GPU work within a command buffer. Wraps `id<MTLFence>`.
-pub struct MtlFence {
+pub struct Fence {
     raw: ObjcId,
 }
 
-impl MtlFence {
+impl Fence {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlFence { raw }
+        Fence { raw }
     }
 
     pub fn as_raw(&self) -> ObjcId {
@@ -17,20 +17,20 @@ impl MtlFence {
     }
 }
 
-impl Drop for MtlFence {
+impl Drop for Fence {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }
 }
 
 /// A GPU event for synchronizing command buffer execution. Wraps `id<MTLEvent>`.
-pub struct MtlEvent {
+pub struct Event {
     raw: ObjcId,
 }
 
-impl MtlEvent {
+impl Event {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlEvent { raw }
+        Event { raw }
     }
 
     pub fn as_raw(&self) -> ObjcId {
@@ -38,20 +38,20 @@ impl MtlEvent {
     }
 }
 
-impl Drop for MtlEvent {
+impl Drop for Event {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }
 }
 
 /// A shared event for CPU/GPU synchronization. Wraps `id<MTLSharedEvent>`.
-pub struct MtlSharedEvent {
+pub struct SharedEvent {
     raw: ObjcId,
 }
 
-impl MtlSharedEvent {
+impl SharedEvent {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlSharedEvent { raw }
+        SharedEvent { raw }
     }
 
     /// Get the current signaled value.
@@ -64,7 +64,7 @@ impl MtlSharedEvent {
     }
 }
 
-impl Drop for MtlSharedEvent {
+impl Drop for SharedEvent {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }

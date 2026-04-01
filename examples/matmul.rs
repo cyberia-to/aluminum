@@ -1,9 +1,9 @@
 //! Matrix multiplication on Metal GPU — compute example
 
-use aruminium::{MetalError, MtlDevice};
+use aruminium::{Gpu, GpuError};
 
-fn main() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn main() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     println!("Device: {}", device.name());
 
     let queue = device.new_command_queue()?;
@@ -36,27 +36,27 @@ fn main() -> Result<(), MetalError> {
         }
     "#;
 
-    let lib = device.new_library_with_source(source)?;
-    let func = lib.get_function("matmul")?;
-    let pipeline = device.new_compute_pipeline(&func)?;
+    let lib = device.compile(source)?;
+    let func = lib.function("matmul")?;
+    let pipeline = device.pipeline(&func)?;
 
     let m = 64usize;
     let n = 64usize;
     let k = 64usize;
 
-    let buf_a = device.new_buffer(m * k * 4)?;
-    let buf_b = device.new_buffer(k * n * 4)?;
-    let buf_c = device.new_buffer(m * n * 4)?;
+    let buf_a = device.buffer(m * k * 4)?;
+    let buf_b = device.buffer(k * n * 4)?;
+    let buf_c = device.buffer(m * n * 4)?;
 
     // A = identity, B = all ones => C should be all ones
-    buf_a.with_f32_mut(|d| {
+    buf_a.write_f32(|d| {
         for i in 0..m {
             for j in 0..k {
                 d[i * k + j] = if i == j { 1.0 } else { 0.0 };
             }
         }
     });
-    buf_b.with_f32_mut(|d| {
+    buf_b.write_f32(|d| {
         for i in 0..d.len() {
             d[i] = 1.0;
         }
@@ -80,19 +80,19 @@ fn main() -> Result<(), MetalError> {
         )
     };
 
-    let cmd = queue.command_buffer()?;
-    let enc = cmd.compute_encoder()?;
-    enc.set_pipeline(&pipeline);
-    enc.set_buffer(&buf_a, 0, 0);
-    enc.set_buffer(&buf_b, 0, 1);
-    enc.set_buffer(&buf_c, 0, 2);
-    enc.set_bytes(params_bytes, 3);
-    enc.dispatch_threads((n, m, 1), (16, 16, 1));
-    enc.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let enc = cmd.encoder()?;
+    enc.bind(&pipeline);
+    enc.bind_buffer(&buf_a, 0, 0);
+    enc.bind_buffer(&buf_b, 0, 1);
+    enc.bind_buffer(&buf_c, 0, 2);
+    enc.push(params_bytes, 3);
+    enc.launch((n, m, 1), (16, 16, 1));
+    enc.finish();
+    cmd.submit();
+    cmd.wait();
 
-    buf_c.with_f32(|d| {
+    buf_c.read_f32(|d| {
         let mut max_err: f32 = 0.0;
         for i in 0..m * n {
             max_err = max_err.max((d[i] - 1.0).abs());

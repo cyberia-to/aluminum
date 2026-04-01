@@ -1,10 +1,10 @@
 //! Integration tests — full GPU pipeline: compile → dispatch → verify
 
-use aruminium::{autorelease_pool, ComputeDispatcher, MetalError, MtlDevice};
+use aruminium::{autorelease_pool, Dispatch, Gpu, GpuError};
 
 #[test]
-fn vecadd_1024() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn vecadd_1024() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let source = r#"
@@ -17,37 +17,37 @@ fn vecadd_1024() -> Result<(), MetalError> {
             c[id] = a[id] + b[id];
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
-    let pipe = device.new_compute_pipeline(&lib.get_function("vecadd")?)?;
+    let lib = device.compile(source)?;
+    let pipe = device.pipeline(&lib.function("vecadd")?)?;
 
     let n = 1024usize;
-    let buf_a = device.new_buffer(n * 4)?;
-    let buf_b = device.new_buffer(n * 4)?;
-    let buf_c = device.new_buffer(n * 4)?;
+    let buf_a = device.buffer(n * 4)?;
+    let buf_b = device.buffer(n * 4)?;
+    let buf_c = device.buffer(n * 4)?;
 
-    buf_a.with_f32_mut(|d| {
+    buf_a.write_f32(|d| {
         for i in 0..n {
             d[i] = i as f32;
         }
     });
-    buf_b.with_f32_mut(|d| {
+    buf_b.write_f32(|d| {
         for i in 0..n {
             d[i] = (n - i) as f32;
         }
     });
 
-    let cmd = queue.command_buffer()?;
-    let enc = cmd.compute_encoder()?;
-    enc.set_pipeline(&pipe);
-    enc.set_buffer(&buf_a, 0, 0);
-    enc.set_buffer(&buf_b, 0, 1);
-    enc.set_buffer(&buf_c, 0, 2);
-    enc.dispatch_threads((n, 1, 1), (64, 1, 1));
-    enc.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let enc = cmd.encoder()?;
+    enc.bind(&pipe);
+    enc.bind_buffer(&buf_a, 0, 0);
+    enc.bind_buffer(&buf_b, 0, 1);
+    enc.bind_buffer(&buf_c, 0, 2);
+    enc.launch((n, 1, 1), (64, 1, 1));
+    enc.finish();
+    cmd.submit();
+    cmd.wait();
 
-    buf_c.with_f32(|d| {
+    buf_c.read_f32(|d| {
         for i in 0..n {
             assert!(
                 (d[i] - n as f32).abs() < 1e-6,
@@ -61,8 +61,8 @@ fn vecadd_1024() -> Result<(), MetalError> {
 }
 
 #[test]
-fn matmul_64x64() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn matmul_64x64() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let source = r#"
@@ -82,23 +82,23 @@ fn matmul_64x64() -> Result<(), MetalError> {
             C[row * p.N + col] = sum;
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
-    let pipe = device.new_compute_pipeline(&lib.get_function("matmul")?)?;
+    let lib = device.compile(source)?;
+    let pipe = device.pipeline(&lib.function("matmul")?)?;
 
     let m = 64usize;
-    let buf_a = device.new_buffer(m * m * 4)?;
-    let buf_b = device.new_buffer(m * m * 4)?;
-    let buf_c = device.new_buffer(m * m * 4)?;
+    let buf_a = device.buffer(m * m * 4)?;
+    let buf_b = device.buffer(m * m * 4)?;
+    let buf_c = device.buffer(m * m * 4)?;
 
     // A = identity, B = ones => C = ones
-    buf_a.with_f32_mut(|d| {
+    buf_a.write_f32(|d| {
         for i in 0..m {
             for j in 0..m {
                 d[i * m + j] = if i == j { 1.0 } else { 0.0 };
             }
         }
     });
-    buf_b.with_f32_mut(|d| d.fill(1.0));
+    buf_b.write_f32(|d| d.fill(1.0));
 
     #[repr(C)]
     struct P {
@@ -115,19 +115,19 @@ fn matmul_64x64() -> Result<(), MetalError> {
         std::slice::from_raw_parts(&params as *const P as *const u8, std::mem::size_of::<P>())
     };
 
-    let cmd = queue.command_buffer()?;
-    let enc = cmd.compute_encoder()?;
-    enc.set_pipeline(&pipe);
-    enc.set_buffer(&buf_a, 0, 0);
-    enc.set_buffer(&buf_b, 0, 1);
-    enc.set_buffer(&buf_c, 0, 2);
-    enc.set_bytes(params_bytes, 3);
-    enc.dispatch_threads((m, m, 1), (16, 16, 1));
-    enc.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let enc = cmd.encoder()?;
+    enc.bind(&pipe);
+    enc.bind_buffer(&buf_a, 0, 0);
+    enc.bind_buffer(&buf_b, 0, 1);
+    enc.bind_buffer(&buf_c, 0, 2);
+    enc.push(params_bytes, 3);
+    enc.launch((m, m, 1), (16, 16, 1));
+    enc.finish();
+    cmd.submit();
+    cmd.wait();
 
-    buf_c.with_f32(|d| {
+    buf_c.read_f32(|d| {
         let max_err: f32 = d.iter().map(|&v| (v - 1.0).abs()).fold(0.0, f32::max);
         assert!(max_err < 1e-5, "matmul max_err={}", max_err);
     });
@@ -135,8 +135,8 @@ fn matmul_64x64() -> Result<(), MetalError> {
 }
 
 #[test]
-fn compute_dispatcher_batch() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn compute_dispatcher_batch() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let source = r#"
@@ -147,27 +147,27 @@ fn compute_dispatcher_batch() -> Result<(), MetalError> {
             a[id] = a[id] + 1.0;
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
-    let pipe = device.new_compute_pipeline(&lib.get_function("inc")?)?;
+    let lib = device.compile(source)?;
+    let pipe = device.pipeline(&lib.function("inc")?)?;
 
     let n = 256usize;
-    let buf = device.new_buffer(n * 4)?;
-    buf.with_f32_mut(|d| d.fill(0.0));
+    let buf = device.buffer(n * 4)?;
+    buf.write_f32(|d| d.fill(0.0));
 
-    let disp = ComputeDispatcher::new(&queue);
+    let disp = Dispatch::new(&queue);
 
     // batch 10 increments into one command buffer
     unsafe {
-        disp.dispatch_batch(|batch| {
+        disp.batch(|batch| {
             for _ in 0..10 {
-                batch.set_pipeline(&pipe);
-                batch.set_buffer(&buf, 0, 0);
-                batch.dispatch_threads((n, 1, 1), (64, 1, 1));
+                batch.bind(&pipe);
+                batch.bind_buffer(&buf, 0, 0);
+                batch.launch((n, 1, 1), (64, 1, 1));
             }
         });
     }
 
-    buf.with_f32(|d| {
+    buf.read_f32(|d| {
         for (i, &v) in d.iter().enumerate() {
             assert!(
                 (v - 10.0).abs() < 1e-6,
@@ -181,8 +181,8 @@ fn compute_dispatcher_batch() -> Result<(), MetalError> {
 }
 
 #[test]
-fn compute_dispatcher_async_pipelining() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn compute_dispatcher_async_pipelining() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let source = r#"
@@ -193,23 +193,23 @@ fn compute_dispatcher_async_pipelining() -> Result<(), MetalError> {
             a[id] = a[id] + 1.0;
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
-    let pipe = device.new_compute_pipeline(&lib.get_function("inc")?)?;
+    let lib = device.compile(source)?;
+    let pipe = device.pipeline(&lib.function("inc")?)?;
 
     let n = 256usize;
-    let buf = device.new_buffer(n * 4)?;
-    buf.with_f32_mut(|d| d.fill(0.0));
+    let buf = device.buffer(n * 4)?;
+    buf.write_f32(|d| d.fill(0.0));
 
-    let disp = ComputeDispatcher::new(&queue);
+    let disp = Dispatch::new(&queue);
 
     // pipeline 5 async batches
     let mut prev = None;
     for _ in 0..5 {
         let future = unsafe {
-            disp.dispatch_batch_async(|batch| {
-                batch.set_pipeline(&pipe);
-                batch.set_buffer(&buf, 0, 0);
-                batch.dispatch_threads((n, 1, 1), (64, 1, 1));
+            disp.batch_async(|batch| {
+                batch.bind(&pipe);
+                batch.bind_buffer(&buf, 0, 0);
+                batch.launch((n, 1, 1), (64, 1, 1));
             })
         };
         if let Some(p) = prev {
@@ -221,7 +221,7 @@ fn compute_dispatcher_async_pipelining() -> Result<(), MetalError> {
         aruminium::GpuFuture::wait(p);
     }
 
-    buf.with_f32(|d| {
+    buf.read_f32(|d| {
         for (i, &v) in d.iter().enumerate() {
             assert!(
                 (v - 5.0).abs() < 1e-6,
@@ -235,38 +235,38 @@ fn compute_dispatcher_async_pipelining() -> Result<(), MetalError> {
 }
 
 #[test]
-fn private_buffer_blit_copy() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn private_buffer_blit_copy() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let n = 256usize;
-    let shared = device.new_buffer(n * 4)?;
-    let private = device.new_buffer_private(n * 4)?;
-    let readback = device.new_buffer(n * 4)?;
+    let shared = device.buffer(n * 4)?;
+    let private = device.buffer_private(n * 4)?;
+    let readback = device.buffer(n * 4)?;
 
-    shared.with_f32_mut(|d| {
+    shared.write_f32(|d| {
         for (i, v) in d.iter_mut().enumerate() {
             *v = i as f32;
         }
     });
 
     // shared -> private via blit
-    let cmd = queue.command_buffer()?;
-    let blit = cmd.blit_encoder()?;
-    blit.copy_buffer(&shared, 0, &private, 0, n * 4);
-    blit.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let blit = cmd.copier()?;
+    blit.copy(&shared, 0, &private, 0, n * 4);
+    blit.finish();
+    cmd.submit();
+    cmd.wait();
 
     // private -> readback via blit
-    let cmd = queue.command_buffer()?;
-    let blit = cmd.blit_encoder()?;
-    blit.copy_buffer(&private, 0, &readback, 0, n * 4);
-    blit.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let blit = cmd.copier()?;
+    blit.copy(&private, 0, &readback, 0, n * 4);
+    blit.finish();
+    cmd.submit();
+    cmd.wait();
 
-    readback.with_f32(|d| {
+    readback.read_f32(|d| {
         for (i, &v) in d.iter().enumerate() {
             assert_eq!(v, i as f32, "blit copy mismatch at {}", i);
         }
@@ -275,8 +275,8 @@ fn private_buffer_blit_copy() -> Result<(), MetalError> {
 }
 
 #[test]
-fn autorelease_pool_dispatch() -> Result<(), MetalError> {
-    let device = MtlDevice::system_default()?;
+fn autorelease_pool_dispatch() -> Result<(), GpuError> {
+    let device = Gpu::open()?;
     let queue = device.new_command_queue()?;
 
     let source = r#"
@@ -287,28 +287,28 @@ fn autorelease_pool_dispatch() -> Result<(), MetalError> {
             a[id] = a[id] + 1.0;
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
-    let pipe = device.new_compute_pipeline(&lib.get_function("noop")?)?;
-    let buf = device.new_buffer(256 * 4)?;
-    buf.with_f32_mut(|d| d.fill(0.0));
+    let lib = device.compile(source)?;
+    let pipe = device.pipeline(&lib.function("noop")?)?;
+    let buf = device.buffer(256 * 4)?;
+    buf.write_f32(|d| d.fill(0.0));
 
     // 100 dispatches in autorelease pool with autoreleased command buffers
     autorelease_pool(|| {
         for _ in 0..100 {
             unsafe {
-                let cmd = queue.command_buffer_autoreleased();
-                let enc = cmd.compute_encoder_autoreleased();
-                enc.set_pipeline(&pipe);
-                enc.set_buffer(&buf, 0, 0);
-                enc.dispatch_threads((256, 1, 1), (64, 1, 1));
-                enc.end_encoding();
-                cmd.commit();
-                cmd.wait_until_completed();
+                let cmd = queue.commands_autoreleased();
+                let enc = cmd.encoder_autoreleased();
+                enc.bind(&pipe);
+                enc.bind_buffer(&buf, 0, 0);
+                enc.launch((256, 1, 1), (64, 1, 1));
+                enc.finish();
+                cmd.submit();
+                cmd.wait();
             }
         }
     });
 
-    buf.with_f32(|d| {
+    buf.read_f32(|d| {
         assert!(
             (d[0] - 100.0).abs() < 1e-6,
             "autorelease pool: d[0]={}, expected 100.0",

@@ -1,13 +1,13 @@
 //! metal_probe — Metal GPU discovery and capability probe
 
-use aruminium::{MetalError, MtlDevice};
+use aruminium::{Gpu, GpuError};
 
-fn main() -> Result<(), MetalError> {
+fn main() -> Result<(), GpuError> {
     println!("=== Metal Probe ===\n");
 
     // Level 1: Device discovery
     println!("--- Level 1: Device Discovery ---");
-    let devices = MtlDevice::all()?;
+    let devices = Gpu::all()?;
     println!("Found {} Metal device(s)\n", devices.len());
 
     for (i, dev) in devices.iter().enumerate() {
@@ -29,14 +29,14 @@ fn main() -> Result<(), MetalError> {
 
     // Level 2: Buffer creation
     println!("--- Level 2: Buffer Creation ---");
-    let device = MtlDevice::system_default()?;
-    let buf = device.new_buffer(4096)?;
+    let device = Gpu::open()?;
+    let buf = device.buffer(4096)?;
     println!("Created 4096-byte shared buffer");
-    buf.with_data_mut(|d| {
+    buf.write(|d| {
         d[0] = 0xDE;
         d[1] = 0xAD;
     });
-    buf.with_data(|d| {
+    buf.read(|d| {
         println!("  Read back: [{:#04x}, {:#04x}]", d[0], d[1]);
     });
     println!();
@@ -53,16 +53,16 @@ fn main() -> Result<(), MetalError> {
             c[id] = a[id] + b[id];
         }
     "#;
-    let lib = device.new_library_with_source(source)?;
+    let lib = device.compile(source)?;
     println!("Compiled MSL source");
     println!("  Functions: {:?}", lib.function_names());
-    let func = lib.get_function("probe_add")?;
+    let func = lib.function("probe_add")?;
     println!("  Got function: {}", func.name());
     println!();
 
     // Level 4: Compute pipeline
     println!("--- Level 4: Compute Pipeline ---");
-    let pipeline = device.new_compute_pipeline(&func)?;
+    let pipeline = device.pipeline(&func)?;
     println!(
         "  Max threads/threadgroup: {}",
         pipeline.max_total_threads_per_threadgroup()
@@ -76,34 +76,34 @@ fn main() -> Result<(), MetalError> {
     // Level 5: Compute dispatch
     println!("--- Level 5: Compute Dispatch ---");
     let n = 256usize;
-    let buf_a = device.new_buffer(n * 4)?;
-    let buf_b = device.new_buffer(n * 4)?;
-    let buf_c = device.new_buffer(n * 4)?;
+    let buf_a = device.buffer(n * 4)?;
+    let buf_b = device.buffer(n * 4)?;
+    let buf_c = device.buffer(n * 4)?;
 
-    buf_a.with_f32_mut(|d| {
+    buf_a.write_f32(|d| {
         for v in d.iter_mut().take(n) {
             *v = 1.0;
         }
     });
-    buf_b.with_f32_mut(|d| {
+    buf_b.write_f32(|d| {
         for v in d.iter_mut().take(n) {
             *v = 2.0;
         }
     });
 
     let queue = device.new_command_queue()?;
-    let cmd = queue.command_buffer()?;
-    let enc = cmd.compute_encoder()?;
-    enc.set_pipeline(&pipeline);
-    enc.set_buffer(&buf_a, 0, 0);
-    enc.set_buffer(&buf_b, 0, 1);
-    enc.set_buffer(&buf_c, 0, 2);
-    enc.dispatch_threads((n, 1, 1), (64, 1, 1));
-    enc.end_encoding();
-    cmd.commit();
-    cmd.wait_until_completed();
+    let cmd = queue.commands()?;
+    let enc = cmd.encoder()?;
+    enc.bind(&pipeline);
+    enc.bind_buffer(&buf_a, 0, 0);
+    enc.bind_buffer(&buf_b, 0, 1);
+    enc.bind_buffer(&buf_c, 0, 2);
+    enc.launch((n, 1, 1), (64, 1, 1));
+    enc.finish();
+    cmd.submit();
+    cmd.wait();
 
-    let ok = buf_c.with_f32(|d| {
+    let ok = buf_c.read_f32(|d| {
         let mut pass = true;
         for (i, &v) in d.iter().enumerate().take(n) {
             if (v - 3.0).abs() > 1e-6 {

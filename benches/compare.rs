@@ -208,7 +208,7 @@ fn main() {
         "  └ bandwidth", bw_r, bw_o
     );
 
-    // 6b. SAXPY with ComputeDispatcher
+    // 6b. SAXPY with Dispatch
     let ri = aruminium::large_compute_imp(iters, n);
     let bw_ri = (n as f64 * 4.0 * 3.0) / ri / 1e9;
     println!(

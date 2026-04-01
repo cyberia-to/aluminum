@@ -1,16 +1,16 @@
-//! MtlTexture: GPU texture wrapper
+//! Texture: GPU texture wrapper
 
 use crate::ffi::*;
 use std::ffi::c_void;
 
 /// A Metal texture. Wraps `id<MTLTexture>`.
-pub struct MtlTexture {
+pub struct Texture {
     raw: ObjcId,
 }
 
-impl MtlTexture {
+impl Texture {
     pub(crate) fn from_raw(raw: ObjcId) -> Self {
-        MtlTexture { raw }
+        Texture { raw }
     }
 
     /// Texture width in pixels.
@@ -86,7 +86,7 @@ impl MtlTexture {
     }
 }
 
-impl Drop for MtlTexture {
+impl Drop for Texture {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }

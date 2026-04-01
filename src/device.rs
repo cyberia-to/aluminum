@@ -1,39 +1,39 @@
-//! MtlDevice: Metal GPU device discovery and factory methods
+//! Gpu: Metal GPU device discovery and factory methods
 
-use crate::buffer::MtlBuffer;
-use crate::command::MtlCommandQueue;
+use crate::buffer::Buffer;
+use crate::command::Queue;
 use crate::ffi::*;
-use crate::pipeline::MtlComputePipeline;
-use crate::shader::{MtlFunction, MtlLibrary};
-use crate::texture::MtlTexture;
-use crate::MetalError;
+use crate::pipeline::Pipeline;
+use crate::shader::{Shader, ShaderLib};
+use crate::texture::Texture;
+use crate::GpuError;
 use std::ffi::c_void;
 
 /// A Metal GPU device. Wraps `id<MTLDevice>`.
-pub struct MtlDevice {
+pub struct Gpu {
     raw: ObjcId,
 }
 
-impl MtlDevice {
+impl Gpu {
     /// Get the system default Metal device.
     ///
     /// Falls back to first device from MTLCopyAllDevices if
     /// MTLCreateSystemDefaultDevice returns nil (headless/no display session).
-    pub fn system_default() -> Result<Self, MetalError> {
+    pub fn open() -> Result<Self, GpuError> {
         let raw = unsafe { MTLCreateSystemDefaultDevice() };
         if !raw.is_null() {
-            return Ok(MtlDevice { raw });
+            return Ok(Gpu { raw });
         }
         // Fallback: MTLCopyAllDevices works even without active display session
         let devices = Self::all()?;
-        devices.into_iter().next().ok_or(MetalError::DeviceNotFound)
+        devices.into_iter().next().ok_or(GpuError::DeviceNotFound)
     }
 
     /// Get all available Metal devices.
-    pub fn all() -> Result<Vec<Self>, MetalError> {
+    pub fn all() -> Result<Vec<Self>, GpuError> {
         let arr = unsafe { MTLCopyAllDevices() };
         if arr.is_null() {
-            return Err(MetalError::DeviceNotFound);
+            return Err(GpuError::DeviceNotFound);
         }
         let count = unsafe { msg0_usize(arr, SEL_count()) };
         let mut devices = Vec::with_capacity(count);
@@ -41,7 +41,7 @@ impl MtlDevice {
             let dev = unsafe { msg1::<NSUInteger>(arr, SEL_objectAtIndex(), i) };
             if !dev.is_null() {
                 unsafe { retain(dev) };
-                devices.push(MtlDevice { raw: dev });
+                devices.push(Gpu { raw: dev });
             }
         }
         unsafe { release(arr) };
@@ -77,20 +77,20 @@ impl MtlDevice {
     }
 
     /// Create a new command queue.
-    pub fn new_command_queue(&self) -> Result<MtlCommandQueue, MetalError> {
+    pub fn new_command_queue(&self) -> Result<Queue, GpuError> {
         let raw = unsafe { msg0(self.raw, SEL_newCommandQueue()) };
         if raw.is_null() {
-            return Err(MetalError::QueueCreationFailed);
+            return Err(GpuError::QueueCreationFailed);
         }
-        Ok(MtlCommandQueue::from_raw(raw))
+        Ok(Queue::from_raw(raw))
     }
 
     /// Create a shared-mode buffer of the given byte size.
     ///
-    /// `size` must be > 0. Use `new_buffer_with_data` for initialized buffers.
-    pub fn new_buffer(&self, size: usize) -> Result<MtlBuffer, MetalError> {
+    /// `size` must be > 0. Use `buffer_with_data` for initialized buffers.
+    pub fn buffer(&self, size: usize) -> Result<Buffer, GpuError> {
         if size == 0 {
-            return Err(MetalError::BufferCreationFailed("size must be > 0".into()));
+            return Err(GpuError::BufferCreationFailed("size must be > 0".into()));
         }
         let raw = unsafe {
             msg2::<NSUInteger, NSUInteger>(
@@ -101,17 +101,17 @@ impl MtlDevice {
             )
         };
         if raw.is_null() {
-            return Err(MetalError::BufferCreationFailed(format!("{} bytes", size)));
+            return Err(GpuError::BufferCreationFailed(format!("{} bytes", size)));
         }
-        Ok(MtlBuffer::from_raw(raw, size))
+        Ok(Buffer::from_raw(raw, size))
     }
 
     /// Create a GPU-private buffer. Not accessible from CPU — use blit encoder to copy.
     /// Private storage gives Metal full control over memory placement and caching,
     /// which can yield higher GPU bandwidth for inter-layer inference buffers.
-    pub fn new_buffer_private(&self, size: usize) -> Result<MtlBuffer, MetalError> {
+    pub fn buffer_private(&self, size: usize) -> Result<Buffer, GpuError> {
         if size == 0 {
-            return Err(MetalError::BufferCreationFailed("size must be > 0".into()));
+            return Err(GpuError::BufferCreationFailed("size must be > 0".into()));
         }
         let raw = unsafe {
             msg2::<NSUInteger, NSUInteger>(
@@ -122,9 +122,9 @@ impl MtlDevice {
             )
         };
         if raw.is_null() {
-            return Err(MetalError::BufferCreationFailed(format!("{} bytes", size)));
+            return Err(GpuError::BufferCreationFailed(format!("{} bytes", size)));
         }
-        Ok(MtlBuffer::from_raw_private(raw, size))
+        Ok(Buffer::from_raw_private(raw, size))
     }
 
     /// Wrap an existing pointer as a Metal buffer — zero copy.
@@ -138,13 +138,15 @@ impl MtlDevice {
     /// - `size` must be page-aligned
     /// - Memory at `ptr..ptr+size` must remain valid while the buffer exists
     /// - Caller must not free the memory while GPU commands are in flight
-    pub unsafe fn new_buffer_no_copy(
+    pub unsafe fn buffer_wrap(
         &self,
         ptr: *mut std::ffi::c_void,
         size: usize,
-    ) -> Result<MtlBuffer, MetalError> {
+    ) -> Result<Buffer, GpuError> {
         if ptr.is_null() || size == 0 {
-            return Err(MetalError::BufferCreationFailed("null ptr or zero size".into()));
+            return Err(GpuError::BufferCreationFailed(
+                "null ptr or zero size".into(),
+            ));
         }
         // deallocator = nil — we manage the memory ourselves
         let raw = msg4::<*mut c_void, NSUInteger, NSUInteger, *const c_void>(
@@ -156,16 +158,16 @@ impl MtlDevice {
             std::ptr::null(), // nil deallocator block
         );
         if raw.is_null() {
-            return Err(MetalError::BufferCreationFailed(format!(
+            return Err(GpuError::BufferCreationFailed(format!(
                 "newBufferWithBytesNoCopy failed: ptr={:?} size={}",
                 ptr, size
             )));
         }
-        Ok(MtlBuffer::from_raw(raw, size))
+        Ok(Buffer::from_raw(raw, size))
     }
 
     /// Create a shared-mode buffer initialized with data.
-    pub fn new_buffer_with_data(&self, data: &[u8]) -> Result<MtlBuffer, MetalError> {
+    pub fn buffer_with_data(&self, data: &[u8]) -> Result<Buffer, GpuError> {
         let raw = unsafe {
             msg3::<*const c_void, NSUInteger, NSUInteger>(
                 self.raw,
@@ -176,16 +178,16 @@ impl MtlDevice {
             )
         };
         if raw.is_null() {
-            return Err(MetalError::BufferCreationFailed(format!(
+            return Err(GpuError::BufferCreationFailed(format!(
                 "{} bytes",
                 data.len()
             )));
         }
-        Ok(MtlBuffer::from_raw(raw, data.len()))
+        Ok(Buffer::from_raw(raw, data.len()))
     }
 
     /// Compile Metal Shading Language source into a library.
-    pub fn new_library_with_source(&self, source: &str) -> Result<MtlLibrary, MetalError> {
+    pub fn compile(&self, source: &str) -> Result<ShaderLib, GpuError> {
         let ns_source = nsstring(source);
         let mut error: ObjcId = std::ptr::null_mut();
         let raw = unsafe {
@@ -203,16 +205,13 @@ impl MtlDevice {
         };
         if raw.is_null() {
             let msg = nserror_string(error).unwrap_or_else(|| "unknown error".into());
-            return Err(MetalError::LibraryCompilationFailed(msg));
+            return Err(GpuError::LibraryCompilationFailed(msg));
         }
-        Ok(MtlLibrary::from_raw(raw))
+        Ok(ShaderLib::from_raw(raw))
     }
 
     /// Create a compute pipeline from a function.
-    pub fn new_compute_pipeline(
-        &self,
-        function: &MtlFunction,
-    ) -> Result<MtlComputePipeline, MetalError> {
+    pub fn pipeline(&self, function: &Shader) -> Result<Pipeline, GpuError> {
         let mut error: ObjcId = std::ptr::null_mut();
         let raw = unsafe {
             type F = unsafe extern "C" fn(ObjcId, ObjcSel, ObjcId, *mut ObjcId) -> ObjcId;
@@ -226,56 +225,52 @@ impl MtlDevice {
         };
         if raw.is_null() {
             let msg = nserror_string(error).unwrap_or_else(|| "unknown error".into());
-            return Err(MetalError::PipelineCreationFailed(msg));
+            return Err(GpuError::PipelineCreationFailed(msg));
         }
-        Ok(MtlComputePipeline::from_raw(raw))
+        Ok(Pipeline::from_raw(raw))
     }
 
     /// Create a texture with the given descriptor.
     ///
     /// # Safety
     /// `desc` must be a valid MTLTextureDescriptor object.
-    pub unsafe fn new_texture(&self, desc: ObjcId) -> Result<MtlTexture, MetalError> {
+    pub unsafe fn texture(&self, desc: ObjcId) -> Result<Texture, GpuError> {
         let raw = msg1::<ObjcId>(self.raw, SEL_newTextureWithDescriptor(), desc);
         if raw.is_null() {
-            return Err(MetalError::TextureCreationFailed(
+            return Err(GpuError::TextureCreationFailed(
                 "descriptor rejected".into(),
             ));
         }
-        Ok(MtlTexture::from_raw(raw))
+        Ok(Texture::from_raw(raw))
     }
 
     /// Create a new fence.
-    pub fn new_fence(&self) -> Result<crate::sync::MtlFence, MetalError> {
+    pub fn fence(&self) -> Result<crate::sync::Fence, GpuError> {
         let raw = unsafe { msg0(self.raw, SEL_newFence()) };
         if raw.is_null() {
-            return Err(MetalError::CommandBufferError(
-                "fence creation failed".into(),
-            ));
+            return Err(GpuError::CommandBufferError("fence creation failed".into()));
         }
-        Ok(crate::sync::MtlFence::from_raw(raw))
+        Ok(crate::sync::Fence::from_raw(raw))
     }
 
     /// Create a new event.
-    pub fn new_event(&self) -> Result<crate::sync::MtlEvent, MetalError> {
+    pub fn event(&self) -> Result<crate::sync::Event, GpuError> {
         let raw = unsafe { msg0(self.raw, SEL_newEvent()) };
         if raw.is_null() {
-            return Err(MetalError::CommandBufferError(
-                "event creation failed".into(),
-            ));
+            return Err(GpuError::CommandBufferError("event creation failed".into()));
         }
-        Ok(crate::sync::MtlEvent::from_raw(raw))
+        Ok(crate::sync::Event::from_raw(raw))
     }
 
     /// Create a new shared event.
-    pub fn new_shared_event(&self) -> Result<crate::sync::MtlSharedEvent, MetalError> {
+    pub fn shared_event(&self) -> Result<crate::sync::SharedEvent, GpuError> {
         let raw = unsafe { msg0(self.raw, SEL_newSharedEvent()) };
         if raw.is_null() {
-            return Err(MetalError::CommandBufferError(
+            return Err(GpuError::CommandBufferError(
                 "shared event creation failed".into(),
             ));
         }
-        Ok(crate::sync::MtlSharedEvent::from_raw(raw))
+        Ok(crate::sync::SharedEvent::from_raw(raw))
     }
 
     pub fn as_raw(&self) -> ObjcId {
@@ -283,7 +278,7 @@ impl MtlDevice {
     }
 }
 
-impl Drop for MtlDevice {
+impl Drop for Gpu {
     fn drop(&mut self) {
         unsafe { release(self.raw) };
     }
