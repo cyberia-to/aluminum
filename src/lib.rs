@@ -48,7 +48,7 @@ where
     struct PoolGuard(*mut std::ffi::c_void);
     impl Drop for PoolGuard {
         fn drop(&mut self) {
-            unsafe { ffi::objc_autoreleasePoolPop(self.0) };
+            () /* ~ changed by cargo-mutants ~ */
         }
     }
     let pool = unsafe { ffi::objc_autoreleasePoolPush() };

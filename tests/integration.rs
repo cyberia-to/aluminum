@@ -1014,7 +1014,9 @@ fn wrap_block_vecadd() -> Result<(), GpuError> {
         assert!(
             (actual - expected).abs() < 1e-6,
             "wrap_block: c[{}]={}, expected {}",
-            i, actual, expected
+            i,
+            actual,
+            expected
         );
     }
 
